@@ -2,7 +2,7 @@
 
 Welcome to the **Secure Agentic RAG Gateway**! This project is a highly secure, enterprise-grade AI assistant designed to handle corporate queries (HR, IT, Finance) while strictly enforcing security policies to prevent data leaks, prompt injections, and off-topic conversations.
 
-## 📖 Plain English Summary (For Interviewers)
+## 📖 
 
 Imagine you build an AI chatbot for your company's employees to ask HR, IT, or Finance questions. The problem is: how do you stop an employee from asking the bot to write a poem, generate toxic content, leak sensitive salary data, or hack the bot's instructions?
 
