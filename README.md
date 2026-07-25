@@ -1,6 +1,6 @@
 # Multi_agent corporate RAG(AI Firewall) 🛡️
 
-Welcome to the **Secure Agentic RAG Gateway**! This project is a highly secure, enterprise-grade AI assistant designed to handle corporate queries (HR, IT, Finance) while strictly enforcing security policies to prevent data leaks, prompt injections, and off-topic conversations.
+Welcome to the **Multi_agent corporate RAG**! This project is a highly secure, enterprise-grade AI assistant designed to handle corporate queries (HR, IT, Finance) while strictly enforcing security policies to prevent data leaks, prompt injections, and off-topic conversations.
 
 ## 📖 
 
