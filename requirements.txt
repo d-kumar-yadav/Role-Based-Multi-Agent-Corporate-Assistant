@@ -1,0 +1,32 @@
+# Combined dependencies for the AI Firewall application
+fastapi==0.110.3
+uvicorn[standard]
+python-dotenv
+
+# LangChain stack (pinned for nemoguardrails compatibility)
+langchain<0.3.0
+langchain-core<0.3.0
+langchain-community<0.3.0
+langchain-huggingface<0.1.0
+langchain-groq<0.2.0
+langgraph<0.3.0
+langgraph-checkpoint-sqlite
+langchain-text-splitters<0.3.0
+langchain-qdrant<0.3.0
+qdrant-client<2.0.0
+
+pypdf # For loading PDF documents
+
+# Guardrails and PII detection
+nemoguardrails==0.10.1
+# Adding this annoy with a pre-compiled wheel for Windows + Python 3.11 to avoid build errors
+annoy==1.17.3; sys_platform == 'win32' and platform_python_implementation == 'CPython'
+presidio-analyzer<2.3.0
+typer<0.10.0 # Dependency for nemoguardrails
+presidio-anonymizer<2.3.0
+spacy==3.7.5
+
+# Development / Dashboard
+streamlit<1.33.0
+pandas<2.2.0 # Pinned for streamlit compatibility
+sentence-transformers==2.7.0

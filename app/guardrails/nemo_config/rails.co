@@ -1,0 +1,59 @@
+define bot refuse to respond
+  "I cannot comply with that request."
+
+define user express greeting
+  "hello"
+  "hi"
+  "what's up?"
+
+define bot express greeting
+  "Hello! I am your corporate AI assistant. How can I help you today?"
+
+define user ask help
+  "help"
+  "what can you do?"
+  "how do I use this?"
+
+define bot express help
+  "I can answer questions regarding HR, Finance, and IT based on your access level."
+
+define user ask hr queries
+  "what is the recruitment policy in my company?"
+  "what are the policy to recruit a person"
+  "how to apply for a job here"
+  "tell me about the company holidays"
+
+define user ask finance queries
+  "What are the approved corporate credit card limits?"
+  "How do I submit an expense report for my recent business trip?"
+  "When is the deadline to submit invoices?"
+  "What is the budget for next year?"
+
+define user ask it queries
+  "How do I reset my company email password?"
+  "What is the process for requesting a new laptop?"
+  "How do I connect to the corporate VPN?"
+  "My monitor is broken"
+
+define user express bye
+  "bye"
+  "goodbye"
+  "see you later"
+
+define bot express bye
+  "Goodbye! Have a great day."
+
+define flow greeting
+  user express greeting
+  bot express greeting
+  stop
+
+define flow help
+  user ask help
+  bot express help
+  stop
+
+define flow goodbye
+  user express bye
+  bot express bye
+  stop

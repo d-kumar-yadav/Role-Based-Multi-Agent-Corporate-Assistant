@@ -1,0 +1,7 @@
+venv1/
+.git/
+__pycache__/
+*.pyc
+logs/
+app/rag/qdrant_db/
+app/agents/long_term_memory.db
