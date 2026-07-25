@@ -94,3 +94,46 @@ Invoke-RestMethod -Uri http://localhost:8000/query -Method Post -ContentType "ap
 - **NeMo Guardrails**: Nvidia's framework for semantic dialog routing.
 - **Groq**: Ultra-fast LLM inference engine used for the Firewall's native checks.
 - **Docker**: Containerization for seamless deployment.
+
+---
+
+## 📂 Folder Structure
+
+```text
+ai-firewall/
+├── app/
+│   ├── agents/                   # LangGraph nodes and agent orchestration
+│   │   ├── graph.py              # Main router and workflow definition
+│   │   ├── hr_agent_node.py      # HR specialized agent
+│   │   ├── it_agent_node.py      # IT specialized agent
+│   │   ├── finance_agent_node.py # Finance specialized agent
+│   │   └── validator_node.py     # Checks agent output before returning
+│   ├── auth/                     
+│   │   └── roles.py              # RBAC implementation
+│   ├── config/                   
+│   │   └── env_config.py         # Environment configurations
+│   ├── guardrails/               
+│   │   ├── input_checks.py       # Layer 1 Native LLM Firewall & PII checker
+│   │   ├── output_checks.py      # Final verification of AI responses
+│   │   └── nemo_config/          # Layer 2 NeMo Guardrails configuration
+│   │       ├── config.yml        # NeMo configuration rules
+│   │       ├── rails.co          # Conversational dialog logic
+│   │       └── config.py         # Custom LangChain model wrappers
+│   ├── rag/                      
+│   │   ├── ingest.py             # Ingestion scripts for vector DB
+│   │   ├── retriever.py          # Document search logic
+│   │   ├── vectorstore.py        # Database connection logic
+│   │   ├── qdrant_db/            # Local vector database storage
+│   │   └── documents/            # All enterprise PDFs and policies
+│   ├── observability/            
+│   │   └── logger.py             # Dashbboard and console logging setup
+│   └── main.py                   # FastAPI Application Entrypoint
+├── assets/                       # UI screenshots for documentation
+├── dashboard/                    # Frontend analytics dashboard code
+├── logs/                         # Execution logs storage
+├── .env                          # API keys and secrets (Git ignored)
+├── docker-compose.yml            # Docker multi-container configuration
+├── Dockerfile                    # Backend container build instructions
+├── requirements.txt              # Python dependencies
+└── README.md                     # You are here!
+```
