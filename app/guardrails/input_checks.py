@@ -90,15 +90,12 @@ Answer:"""
     # 3. NeMo Guardrails (For Dialog / Greetings for SAFE queries)
     try:
         from nemoguardrails import LLMRails, RailsConfig
-        import asyncio
-        import nest_asyncio
-        nest_asyncio.apply()
+        
 
         config = RailsConfig.from_path(os.path.join(os.path.dirname(__file__), "nemo_config"))
         rails = LLMRails(config)
 
-        # Use sync generate
-        response = rails.generate(messages=[{"role": "user", "content": query}])
+        response = await rails.generate_async(messages=[{"role": "user", "content": query}])
         content = response["content"]
 
         if "Hello! I am your corporate AI assistant" in content or "Goodbye" in content or "I can answer questions regarding" in content:
