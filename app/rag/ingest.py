@@ -33,8 +33,7 @@ def ingest_documents(reset: bool = True):
     vectorstore = get_vectorstore()
     
     if reset:
-        # Proper way to reset Qdrant without locking the database twice!
-        # We reuse the client that vectorstore already initialized.
+      
         client = vectorstore.client
         if client.collection_exists("enterprise_docs"):
             client.delete_collection("enterprise_docs")
@@ -78,14 +77,15 @@ def ingest_documents(reset: bool = True):
             file_path = os.path.join(root, filename)
             
             try:
-                loader = PyPDFLoader(file_path)
-                docs = loader.load()
+                loader = PyPDFLoader(file_path) # it just point to that pdf
+                #extracts all the text, and converts it into LangChain Document objects.
+                docs = loader.load()  
                 chunks = text_splitter.split_documents(docs)
                 
                 for chunk in chunks:
                     for role in roles:
                         chunk_copy = copy.deepcopy(chunk)
-                        # "Do not reuse the original object. Build me a 100%, physically distinct clone of this object in a new area of the computer's memory."
+                        # "Do not reuse the original object. Build a 100%, physically distinct clone of this object in a new area of the computer's memory."
                         # if we donot use deepcopy  Python re-uses the exact same object in memory, changing the label the second time accidentally overwrites the label from the first time! When you look in the all_chunks bucket at the end, you would see two identical chunks, and both of them would be labeled "finance". The "it" label completely vanished.
                         chunk_copy.metadata["role"] = role
                         chunk_copy.metadata["source_file"] = filename

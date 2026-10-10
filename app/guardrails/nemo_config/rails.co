@@ -1,22 +1,40 @@
+# ==========================================
+# 1. BOT RESPONSES 
+# ==========================================
 define bot refuse to respond
-  "I cannot comply with that request."
+  "I cannot comply with that request. I can only answer questions related to HR, Finance, and IT."
 
+define bot express greeting
+  "Hello! I am your corporate AI assistant. How can I help you today?"
+
+define bot express help
+  "I can answer questions regarding HR, Finance, and IT based on your access level."
+
+define bot express bye
+  "Goodbye! Have a great day."
+
+# ==========================================
+# 2. DIALOGUE INTENTS
+# ==========================================
 define user express greeting
   "hello"
   "hi"
   "what's up?"
-
-define bot express greeting
-  "Hello! I am your corporate AI assistant. How can I help you today?"
 
 define user ask help
   "help"
   "what can you do?"
   "how do I use this?"
 
-define bot express help
-  "I can answer questions regarding HR, Finance, and IT based on your access level."
+define user express bye
+  "bye"
+  "goodbye"
+  "see you later"
 
+# ==========================================
+# 3. ALLOWED ON-TOPIC INTENTS
+# (These have no flows below, so they pass through to your LLM)
+# ==========================================
 define user ask hr queries
   "what is the recruitment policy in my company?"
   "what are the policy to recruit a person"
@@ -35,14 +53,9 @@ define user ask it queries
   "How do I connect to the corporate VPN?"
   "My monitor is broken"
 
-define user express bye
-  "bye"
-  "goodbye"
-  "see you later"
-
-define bot express bye
-  "Goodbye! Have a great day."
-
+# ==========================================
+# 5. FLOWS (The Logic)
+# ==========================================
 define flow greeting
   user express greeting
   bot express greeting
@@ -56,4 +69,15 @@ define flow help
 define flow goodbye
   user express bye
   bot express bye
+  stop
+
+# ==========================================
+# 6. CATCH-ALL (Pass-through for valid questions)
+# ==========================================
+define bot pass through
+  "PASS"
+
+define flow catch all
+  user ...
+  bot pass through
   stop

@@ -27,6 +27,7 @@ def validator_node(state):
         "4. DO NOT add conversational filler like 'Here is the final reviewed answer'. Just output the answer itself.\n\n"
         "User Query: {query}\n"
         "Draft Answer: {answer}\n\n"
+        "context {context}\n\n\n"
         "Final Reviewed Answer:"
     )
     

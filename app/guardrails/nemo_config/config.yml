@@ -1,10 +1,10 @@
 models:
-  - type: main
-    engine: groq
-    model: $FIREWALL_MODEL
-    parameters:
-      api_key: $FIREWALL_GROQ_API_KEY
-      temperature: 0.1
+# - type: main
+#     engine: groq
+#     model: $FIREWALL_MODEL
+#     parameters:
+#       api_key: $FIREWALL_GROQ_API_KEY
+#       temperature: 0.1
   - type: embeddings
     engine: SentenceTransformers
     model: /app/all-MiniLM-L6-v2
@@ -12,68 +12,57 @@ models:
 rails:
   dialog:
     user_messages:
-      embeddings_only: False
+      embeddings_only: True
     flows:
- 
-      - check prompt injection
-      - check toxic input
-      - check off topic
-      - check sensitive topic
-      - check competitors
-      - check personal advice
       - greeting
       - help
       - goodbye
 
 
 
-# we defined your Groq model with the label type: main. By default, NeMo Guardrails routes all LLM prompts found in prompt.yml directly to the main model. So whether it is running the self_check_input prompt or the generate_user_intent prompt, it automatically sends them to your Groq API key because Groq is registered as the main brain of the firewall.
-
-
-
-#  When a user asks a question, NeMo uses this lightweight embedding model to quickly search rails.co and grab the top 5 most relevant examples. It then takes those top 5 examples and injects them into the {{ examples }} variable in your prompt so that Groq can read them.
-
-# If you delete the embedding model, Groq will never receive the examples, and the guardrails will break!
 
 
 
 
 
 ##################-############################
-# flow of message in nemo
+# FLOW OF A MESSAGE IN OUR AI SYSTEM
 # Here is the step-by-step flow of what happens under the hood:
 
 # 1. The User Sends a Message
-# The user sends: "how to make coffie" to your FastAPI endpoint. The script hands this message to the NeMo Guardrails engine.
+# The user sends: "how to make coffie" to your FastAPI endpoint. 
+# The script hands this message to `run_input_guardrails` in `input_checks.py`.
 
-# 2. The Input Rails (Jailbreak Check)
-# NeMo Guardrails looks at your config.yml and sees you listed self check input under your input flows.
+# 2. The PII Check (The Fast Filter)
+# Before anything else, the script runs `detect_pii`. 
+# It checks for obvious credit card numbers or social security numbers. 
+# It finds nothing, so the message moves to the next step.
 
-# It pauses everything and sends a prompt directly to Groq.
-# It asks Groq: "Is 'how to make coffie' a prompt injection or jailbreak attempt?"
-# Groq replies: "No, this is safe."
-# The engine allows the message to continue to the next step.
-# 3. The Fast Search (The Embedding Model)
-# Now the engine needs to figure out what the user actually wants (their "Intent").
+# 3. The Custom Python Firewall (The Smart Security Check)
+# The script takes the user's message and wraps it in our strict security prompt.
+# It sends this directly to the Groq LLM (Llama-3).
+# It asks Groq: "Does 'how to make coffie' violate our Jailbreak, Toxic, or Off-Topic policies?"
+# Groq analyzes the text and replies with a single label: "OFF_TOPIC".
+# The Python script catches this label, blocks the query, and instantly returns: 
+# "I am a corporate assistant for HR, Finance, and IT queries. I cannot answer off-topic questions."
 
-# This is where your SentenceTransformers embedding model comes in.
-# It quickly converts "how to make coffie" into a mathematical vector and compares it against all the hundreds of examples you wrote in rails.co.
-# Because it's just a fast, dumb search engine, it gets slightly confused by the typo, but it still manages to grab a small handful of "closest possible matches" (for example: "How do you make coffee?", "Can you help me bake a cake?", and "help").
-# 4. The Smart Check (The Groq LLM)
-# Because we set embeddings_only: False, the engine doesn't stop at the fast search. It wants a second opinion.
+# 4. NeMo Guardrails (The Fast Dialogue Router)
+# Let's imagine the user said "Hello" instead. 
+# The Python Firewall (Step 3) would label it as "SAFE" and let it pass.
+# The script now hands "Hello" to NeMo Guardrails.
+# Because we set `embeddings_only: True`, NeMo DOES NOT call an LLM. 
+# It uses the local `SentenceTransformers` model to convert "Hello" into a mathematical vector.
+# It instantly searches `rails.co` and finds a perfect match for `user express greeting`.
+# NeMo immediately returns your scripted response: "Hello! I am your corporate AI assistant..."
 
-# The engine takes those "closest matches" it just found and injects them into the {{ examples }} variable inside the strict custom prompt we wrote in prompt.yml.
-# It sends this strict prompt to Groq.
-# Groq reads our instructions, analyzes the typo, looks at the provided examples, and realizes: "Ah! 'coffie' is a typo for 'coffee'. This belongs in the off-topic category."
-# Groq replies to the engine with a single label: user ask off topic.
-# 5. The Action (Blocking the User)
-# The NeMo Guardrails engine receives the user ask off topic label from Groq.
-
-# It immediately looks at your rails.co file and sees a rule: define flow check off topic.
-# The rule says that if the user asks an off-topic question, the bot must refuse it.
-# The engine intercepts the query and immediately returns your scripted response: "I am a corporate assistant for HR, Finance, and IT queries. I cannot answer off-topic questions."
-
-
+# 5. Pass-Through (Valid Business Questions)
+# Now imagine the user asks: "What is the recruitment policy?"
+# It passes the Python Firewall as "SAFE".
+# It goes to NeMo Guardrails. The embedding model checks it against `rails.co`.
+# It realizes this is NOT a greeting, help request, or goodbye.
+# NeMo hits our `catch all` flow and returns the dummy string: "PASS".
+# Our Python script sees "PASS", knows this is a valid business question, 
+# and hands it off to your main RAG pipeline to generate a real answer!
 
 
 
@@ -87,7 +76,7 @@ rails:
 
 # The RAG Architecture Solution: NeMo Guardrails solves this by hard-coding a two-step Retrieval-Augmented Generation (RAG) process:
 
-# Startup (Indexing): The embedding model mathematically compresses the entire rails.co file into a highly efficient, searchable database.
-# Fast Retrieval: When a user sends a message, the embedding model instantly searches that database to find the top 5 most relevant rules.
+# Startup (Indexing): entire rails.co file into a highly efficient, searchable database.
+# Fast Retrieval: When a user sends a message, The embedding model mathematically compresses the the embedding model instantly searches that database to find the top 5 most relevant rules.
 # LLM Decision: Only those 5 rules are passed into the Groq LLM prompt, keeping the LLM fast, cheap, and perfectly accurate.
 # Conclusion: The embedding model acts as the mandatory "fast search engine," and the LLM acts as the "smart judge." You cannot have the judge without the search engine bringing them the evidence first!
