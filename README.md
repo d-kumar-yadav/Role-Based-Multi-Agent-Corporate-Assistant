@@ -64,7 +64,7 @@ Here is a look at the system in action (including the dashboard and query blocki
 ### Installation & Running
 
 1. Clone the repository.
-2. Ensure your `.env` file is populated with your API keys:
+2. Copy .env.example to .env and fill in your API keys before running.
    ```env
    GROQ_API_KEY=your_key
    FIREWALL_GROQ_API_KEY=your_key
