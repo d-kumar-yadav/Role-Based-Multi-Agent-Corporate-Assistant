@@ -1,0 +1,226 @@
+[
+  {
+    "user_id": "E1001",
+    "email": "alice.johnson@meridianglobal.example",
+    "name": "Alice Johnson",
+    "role": "employee",
+    "department": "Sales",
+    "manager_id": "E2001",
+    "allowed_departments": [
+      "sales",
+      "shared"
+    ]
+  },
+  {
+    "user_id": "E1002",
+    "email": "raj.patel@meridianglobal.example",
+    "name": "Raj Patel",
+    "role": "employee",
+    "department": "Engineering",
+    "manager_id": "E2002",
+    "allowed_departments": [
+      "engineering",
+      "shared"
+    ]
+  },
+  {
+    "user_id": "E1003",
+    "email": "priya.sharma@meridianglobal.example",
+    "name": "Priya Sharma",
+    "role": "employee",
+    "department": "HR",
+    "manager_id": "E2003",
+    "allowed_departments": [
+      "hr",
+      "shared"
+    ]
+  },
+  {
+    "user_id": "E1004",
+    "email": "sam.chen@meridianglobal.example",
+    "name": "Sam Chen",
+    "role": "employee",
+    "department": "Customer Success",
+    "manager_id": "E2004",
+    "allowed_departments": [
+      "customer success",
+      "shared"
+    ]
+  },
+  {
+    "user_id": "E2001",
+    "email": "bob.smith@meridianglobal.example",
+    "name": "Bob Smith",
+    "role": "manager",
+    "department": "Sales",
+    "manager_id": "E3001",
+    "allowed_departments": [
+      "sales",
+      "shared"
+    ]
+  },
+  {
+    "user_id": "E2002",
+    "email": "kavya.reddy@meridianglobal.example",
+    "name": "Kavya Reddy",
+    "role": "manager",
+    "department": "Engineering",
+    "manager_id": "E3001",
+    "allowed_departments": [
+      "engineering",
+      "shared"
+    ]
+  },
+  {
+    "user_id": "E2003",
+    "email": "arjun.mehta@meridianglobal.example",
+    "name": "Arjun Mehta",
+    "role": "manager",
+    "department": "HR",
+    "manager_id": "E3001",
+    "allowed_departments": [
+      "hr",
+      "shared"
+    ]
+  },
+  {
+    "user_id": "E3001",
+    "email": "meera.iyer@meridianglobal.example",
+    "name": "Meera Iyer",
+    "role": "hr",
+    "department": "HR",
+    "manager_id": "E5001",
+    "allowed_departments": [
+      "hr",
+      "shared"
+    ]
+  },
+  {
+    "user_id": "E3002",
+    "email": "ravi.kumar@meridianglobal.example",
+    "name": "Ravi Kumar",
+    "role": "hr",
+    "department": "HR",
+    "manager_id": "E3001",
+    "allowed_departments": [
+      "hr",
+      "shared"
+    ]
+  },
+  {
+    "user_id": "E3003",
+    "email": "sneha.nair@meridianglobal.example",
+    "name": "Sneha Nair",
+    "role": "hr",
+    "department": "HR",
+    "manager_id": "E3001",
+    "allowed_departments": [
+      "hr",
+      "shared"
+    ]
+  },
+  {
+    "user_id": "E4001",
+    "email": "vikram.singh@meridianglobal.example",
+    "name": "Vikram Singh",
+    "role": "finance",
+    "department": "Finance",
+    "manager_id": "E5002",
+    "allowed_departments": [
+      "finance",
+      "shared"
+    ]
+  },
+  {
+    "user_id": "E4002",
+    "email": "anjali.desai@meridianglobal.example",
+    "name": "Anjali Desai",
+    "role": "finance",
+    "department": "Finance",
+    "manager_id": "E4001",
+    "allowed_departments": [
+      "finance",
+      "shared"
+    ]
+  },
+  {
+    "user_id": "E4003",
+    "email": "rohit.verma@meridianglobal.example",
+    "name": "Rohit Verma",
+    "role": "finance",
+    "department": "Finance",
+    "manager_id": "E4001",
+    "allowed_departments": [
+      "finance",
+      "shared"
+    ]
+  },
+  {
+    "user_id": "E5001",
+    "email": "suresh.pillai@meridianglobal.example",
+    "name": "Suresh Pillai",
+    "role": "it",
+    "department": "IT",
+    "manager_id": "E5003",
+    "allowed_departments": [
+      "it",
+      "shared"
+    ]
+  },
+  {
+    "user_id": "E5002",
+    "email": "anita.rao@meridianglobal.example",
+    "name": "Anita Rao",
+    "role": "it",
+    "department": "IT",
+    "manager_id": "E5003",
+    "allowed_departments": [
+      "it",
+      "shared"
+    ]
+  },
+  {
+    "user_id": "E5003",
+    "email": "deepak.joshi@meridianglobal.example",
+    "name": "Deepak Joshi",
+    "role": "it",
+    "department": "IT",
+    "manager_id": "E5003",
+    "allowed_departments": [
+      "it",
+      "shared"
+    ]
+  },
+  {
+    "user_id": "E6001",
+    "email": "cto@meridianglobal.example",
+    "name": "CTO",
+    "role": "executive",
+    "department": "Engineering",
+    "manager_id": null,
+    "allowed_departments": [
+      "sales",
+      "engineering",
+      "hr",
+      "finance",
+      "it",
+      "shared"
+    ]
+  },
+  {
+    "user_id": "E6002",
+    "email": "cfo@meridianglobal.example",
+    "name": "CFO",
+    "role": "executive",
+    "department": "Finance",
+    "manager_id": null,
+    "allowed_departments": [
+      "sales",
+      "engineering",
+      "hr",
+      "finance",
+      "it",
+      "shared"
+    ]
+  }
+]
