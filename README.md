@@ -121,23 +121,34 @@ This design eliminates the false-positive problem that binary
 groundedness blocking created. See `docs/GROUNDEDNESS_DESIGN.md`
 for the full design rationale.
 
-## Quick Start
+## Quick Start (Local)
 
 Requirements:
 - Python 3.11+
-- Docker and Docker Compose
 - Groq API key (free tier works)
 
-    git clone <repo>
-    cd ai-firewall
+    # 1. Set up virtual environment
+    python -m venv venv
+    venv\Scripts\activate
+
+    # 2. Install dependencies
+    pip install -r requirements.txt
+
+    # 3. Configure environment
     cp .env.example .env
     # Edit .env and set GROQ_API_KEY and FIREWALL_GROQ_API_KEY
-    docker compose up --build
+
+    # 4. Ingest policy documents into Qdrant
+    python -m app.rag.ingest --reset
+
+    # 5. Start the backend (Terminal 1)
+    uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+    # 6. Start the frontend (Terminal 2)
+    streamlit run dashboard/streamlit_app.py --server.port 8501
 
 Backend runs at http://localhost:8000
 Frontend runs at http://localhost:8501
-
-For manual setup without Docker, see `docs/ARCHITECTURE.md`.
 
 ## Security Model
 
@@ -169,8 +180,6 @@ This is a demonstration system, not a production deployment. See
 - Cross-domain latency is roughly 2x single-domain
 
 ## License
-
-Not licensed for production use. Educational and portfolio purposes only.
 
 Not licensed for production use. Educational and portfolio purposes only.
 
