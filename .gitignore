@@ -23,3 +23,11 @@ data/_archived_pdfs/
 *.db-shm
 *.db-wal
 *.db-journal
+all-MiniLM-L6-v2/
+app/agents/long_term_memory.db*
+app/rag/qdrant_db/
+logs/*.db*
+logs/*.jsonl
+dashboard/chats.json
+*.safetensors
+*.onnx
