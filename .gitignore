@@ -20,3 +20,6 @@ venv/
 data/_extracted/
 data/_extracted_done/
 data/_archived_pdfs/
+*.db-shm
+*.db-wal
+*.db-journal

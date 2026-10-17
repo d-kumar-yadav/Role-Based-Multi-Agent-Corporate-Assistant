@@ -1,110 +1,108 @@
-import os
-import copy
-import shutil
-from langchain_community.document_loaders import PyPDFLoader
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from .vectorstore import get_vectorstore
+import argparse
+import hashlib
+import logging
+from pathlib import Path
+import frontmatter
+from langchain_text_splitters import MarkdownHeaderTextSplitter
+from .vectorstore import COLLECTION_NAME, get_vectorstore
 
-DOCS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "documents")
-# DOCS_DIR - "d:\Project_2_AI\ai-firewall\app\rag\documents"
+logger = logging.getLogger("rag.ingest")
 
-def determine_roles_from_folder(folder_name: str) -> list[str]:
-    """Determine which roles should have retrieval access based on the directory name."""
-    folder_lower = folder_name.lower()
-    
-    
-    if folder_lower in ["hr", "finance", "it", "public"]:
-        return [folder_lower]
-        
-    #  for Cross-domain folders
-    if folder_lower.startswith("crossdomain_"):
-        roles = []
-        if "it" in folder_lower: roles.append("it")
-        if "finance" in folder_lower: roles.append("finance")
-        if "hr" in folder_lower: roles.append("hr")
-        return roles if roles else ["public"]
-    
-    # Fallback to public for safety (Fail Open for visibility)
-    return ["public"]
+POLICIES_DIR = "data/policies"
+REQUIRED_FRONTMATTER_KEYS = ["doc_id", "title", "department", "access_level", "roles", "version"]
 
-def ingest_documents(reset: bool = True):
-    """Load, chunk, tag, and store all PDFs by iterating through role folders."""
-    
-    vectorstore = get_vectorstore()
-    
+
+def parse_and_validate_policy(file_path: Path):
+    with open(file_path, "r", encoding="utf-8") as f:
+        content_bytes = f.read().encode("utf-8")
+        post = frontmatter.loads(content_bytes.decode("utf-8"))
+
+    missing_keys = [k for k in REQUIRED_FRONTMATTER_KEYS if k not in post.metadata]
+    if missing_keys:
+        raise ValueError(f"Missing required frontmatter keys: {missing_keys}")
+
+    roles = post.metadata["roles"]
+    if not isinstance(roles, list):
+        raise ValueError(f"'roles' must be a list, got {type(roles).__name__}")
+
+    content_hash = hashlib.sha256(content_bytes).hexdigest()
+    return post.metadata, post.content, content_hash
+
+
+def ingest_documents(reset: bool = False, policies_dir: str = POLICIES_DIR):
     if reset:
-      
-        client = vectorstore.client
-        if client.collection_exists("enterprise_docs"):
-            client.delete_collection("enterprise_docs")
-            # Recreate with 300 dimensions for Spacy
-            from qdrant_client.http.models import Distance, VectorParams
-            client.create_collection(
-                collection_name="enterprise_docs",
-                vectors_config=VectorParams(size=300, distance=Distance.COSINE)
-            )
-            print("Successfully dropped and recreated Qdrant collection for Spacy!")
+        vs = get_vectorstore()
+        if vs.client.collection_exists(COLLECTION_NAME):
+            vs.client.delete_collection(COLLECTION_NAME)
+            print(f"Deleted collection '{COLLECTION_NAME}'.")
 
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=150
+    vectorstore = get_vectorstore()
+
+    splitter = MarkdownHeaderTextSplitter(
+        headers_to_split_on=[("#", "h1"), ("##", "h2"), ("###", "h3")],
+        strip_headers=False,
     )
 
+    path_obj = Path(policies_dir)
+    md_files = sorted(list(path_obj.rglob("*.md")))
+
     all_chunks = []
-    
-    if not os.path.exists(DOCS_DIR):
-        print(f"Documents directory {DOCS_DIR} does not exist.")
-        return
+    access_level_counts: dict[str, int] = {}
+    errors: list[str] = []
 
-    role_counts: dict[str, int] = {}
+    for file_path in md_files:
+        try:
+            metadata, text, content_hash = parse_and_validate_policy(file_path)
+            chunks = splitter.split_text(text)
 
-   
-    for root, dirs, files in os.walk(DOCS_DIR):
-    
-        folder_name = os.path.basename(root)
-        # root- /dcumnets/finance
-        
-        # Determine roles based on folder name
-        if root == DOCS_DIR:
-            roles = ["public"] # Any files left in the root directory default to public
-        else:
-            roles = determine_roles_from_folder(folder_name)
+            for idx, chunk in enumerate(chunks):
+                h1 = chunk.metadata.get("h1")
+                h2 = chunk.metadata.get("h2")
+                section = h2 if h2 is not None else h1
 
-        for filename in sorted(files):
-            if not filename.endswith(".pdf"):
-                continue
-                
-            file_path = os.path.join(root, filename)
-            
-            try:
-                loader = PyPDFLoader(file_path) # it just point to that pdf
-                #extracts all the text, and converts it into LangChain Document objects.
-                docs = loader.load()  
-                chunks = text_splitter.split_documents(docs)
-                
-                for chunk in chunks:
-                    for role in roles:
-                        chunk_copy = copy.deepcopy(chunk)
-                        # "Do not reuse the original object. Build a 100%, physically distinct clone of this object in a new area of the computer's memory."
-                        # if we donot use deepcopy  Python re-uses the exact same object in memory, changing the label the second time accidentally overwrites the label from the first time! When you look in the all_chunks bucket at the end, you would see two identical chunks, and both of them would be labeled "finance". The "it" label completely vanished.
-                        chunk_copy.metadata["role"] = role
-                        chunk_copy.metadata["source_file"] = filename
-                        chunk_copy.metadata["source_folder"] = folder_name
-                        all_chunks.append(chunk_copy)
-                        role_counts[role] = role_counts.get(role, 0) + 1
-                        
-                print(f"Loaded [{folder_name}] {filename} -> {len(chunks)} chunks, mapped to roles: {roles}")
-            except Exception as e:
-                print(f"Failed to load {file_path}: {e}")
-                
+                chunk.metadata = {
+                    "doc_id": metadata["doc_id"],
+                    "title": metadata["title"],
+                    "department": metadata["department"],
+                    "access_level": metadata["access_level"],
+                    "roles": metadata["roles"],
+                    "version": str(metadata["version"]),
+                    "section": section,
+                    "chunk_index": idx,
+                    "content_hash": content_hash,
+                    "source_file": file_path.name,
+                }
+                all_chunks.append(chunk)
+
+                al = metadata["access_level"]
+                access_level_counts[al] = access_level_counts.get(al, 0) + 1
+
+        except Exception as e:
+            err_msg = f"Error processing {file_path}: {e}"
+            logger.error(err_msg)
+            errors.append(err_msg)
+
     if all_chunks:
         vectorstore.add_documents(all_chunks)
-        print(f"\nSuccessfully ingested {len(all_chunks)} total document chunks into ChromaDB.")
-        print("Chunk count by role tag:")
-        for role, count in sorted(role_counts.items()):
-            print(f"  {role}: {count}")
+        print(f"\nSuccessfully ingested {len(all_chunks)} chunks.")
+        print("\nChunks per access_level:")
+        for al, count in sorted(access_level_counts.items()):
+            print(f"  {al}: {count}")
     else:
-        print("No documents found to ingest.")
+        print("\nNo chunks were ingested.")
+
+    if errors:
+        print("\nValidation / Ingestion Failures:")
+        for err in errors:
+            print(f"  - {err}")
+
+    return len(all_chunks), access_level_counts, errors
+
 
 if __name__ == "__main__":
-    ingest_documents(reset=True)
+    parser = argparse.ArgumentParser(description="Ingest markdown policy documents into Qdrant.")
+    parser.add_argument("--reset", action="store_true", default=False, help="Delete and recreate collection")
+    parser.add_argument("--path", type=str, default=POLICIES_DIR, help="Path to policies directory")
+    args = parser.parse_args()
+
+    ingest_documents(reset=args.reset, policies_dir=args.path)

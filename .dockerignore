@@ -1,18 +1,60 @@
-.git
-.github
+# Version control
+.git/
+.gitignore
+.github/
+
+# Environment and secrets
 .env
 .env.*
 !.env.example
-*.db
-*.jsonl
-chats.json
-qdrant_db/
-logs/
+
+# Python cache
 __pycache__/
-*.pyc
+*.py[cod]
+*.egg-info/
 .pytest_cache/
+.mypy_cache/
+
+# Virtual environments
 .venv/
 venv/
+env/
+ENV/
+
+# Local data (baked via COPY or mounted at runtime)
+qdrant_db/
+app/rag/qdrant_db/
+logs/
+*.db
+*.db-journal
+*.jsonl
+chats.json
+dashboard/chats.json
+
+# Dev artifacts
+tests/
+docs/
 assets/
-data/_archived_pdfs/
 data/_extracted/
+data/_extracted_done/
+data/_archived_pdfs/
+
+# Models (downloaded at build time, not copied)
+all-MiniLM-L6-v2/
+*.safetensors
+*.bin
+
+# Docker
+Dockerfile
+Dockerfile.*
+docker-compose.yml
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Docs and misc
+README.md
+*.md
+.DS_Store

@@ -1,139 +1,260 @@
-import streamlit as st
-import json
 import os
-import requests
 import uuid
-import pandas as pd
+from datetime import datetime
 
-CHATS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "chats.json")
-LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "logs", "audit_log.jsonl")
-API_URL = os.getenv("API_URL", "http://localhost:8000/query")
+import requests
+import streamlit as st
 
-st.set_page_config(page_title="AI Firewall Chat", layout="wide")
+API_URL = os.getenv("API_URL", "http://localhost:8000")
 
-# --- Helper Functions for Chat Persistence ---
-def load_chats():
-    if os.path.exists(CHATS_FILE):
-        with open(CHATS_FILE, "r") as f:
-            return json.load(f)
-    return {}
+st.set_page_config(page_title="Meridian Copilot", layout="centered")
 
-def save_chats(chats):
-    with open(CHATS_FILE, "w") as f:
-        json.dump(chats, f, indent=4)
 
-if "chats" not in st.session_state:
-    st.session_state.chats = load_chats()
-
-if "current_thread_id" not in st.session_state:
-    st.session_state.current_thread_id = None
-
-# --- SIDEBAR: Role Selection & Thread Management ---
-st.sidebar.title("Configuration")
-current_user = st.sidebar.selectbox("Select your role:", [
-    "HR", 
-    "Finance", 
-    "IT"
-])
-user_id = current_user.lower()
-
-st.sidebar.markdown("---")
-st.sidebar.subheader("Chat History")
-
-if st.sidebar.button("+ New Chat", use_container_width=True):
-    new_thread = str(uuid.uuid4())
-    st.session_state.chats[new_thread] = {
-        "user_id": user_id,
-        "messages": []
+def _init_state():
+    defaults = {
+        "token": None,
+        "user": None,
+        "thread_id": None,
+        "messages": [],
     }
-    st.session_state.current_thread_id = new_thread
-    save_chats(st.session_state.chats)
+    for key, value in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = value
 
-# Filter threads by current user
-user_threads = {k: v for k, v in st.session_state.chats.items() if v.get("user_id") == user_id}
 
-if user_threads:
-    for thread_id in reversed(list(user_threads.keys())):
-        # Just use a snippet of the first message as the title
-        msgs = user_threads[thread_id]["messages"]
-        title = msgs[0]["content"][:20] + "..." if msgs else "Empty Chat"
-        
-        # Highlight current thread
-        btn_type = "primary" if thread_id == st.session_state.current_thread_id else "secondary"
-        if st.sidebar.button(f"💬 {title}", key=thread_id, use_container_width=True, type=btn_type):
-            st.session_state.current_thread_id = thread_id
+def _auth_headers():
+    return {"Authorization": f"Bearer {st.session_state.token}"}
+
+
+def _login(email: str, password: str) -> bool:
+    try:
+        r = requests.post(
+            f"{API_URL}/auth/token",
+            data={"username": email, "password": password},
+            timeout=10,
+        )
+    except requests.RequestException as e:
+        st.error(f"Cannot reach backend: {e}")
+        return False
+
+    if r.status_code != 200:
+        st.error("Invalid email or password.")
+        return False
+
+    st.session_state.token = r.json()["access_token"]
+
+    try:
+        me = requests.get(f"{API_URL}/auth/me", headers=_auth_headers(), timeout=10)
+        if me.status_code == 200:
+            st.session_state.user = me.json()
+        else:
+            st.error("Token accepted but /auth/me failed.")
+            st.session_state.token = None
+            return False
+    except requests.RequestException as e:
+        st.error(f"Cannot fetch profile: {e}")
+        st.session_state.token = None
+        return False
+
+    return True
+
+
+def _logout():
+    st.session_state.token = None
+    st.session_state.user = None
+    st.session_state.thread_id = None
+    st.session_state.messages = []
+
+
+def _render_login():
+    st.title("Meridian Copilot")
+    st.caption("Sign in to continue.")
+
+    with st.form("login_form"):
+        email = st.text_input("Email", placeholder="alice.johnson@meridianglobal.example")
+        password = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Sign in")
+
+    if submitted:
+        if not email or not password:
+            st.warning("Email and password are required.")
+        elif _login(email, password):
             st.rerun()
-else:
-    st.sidebar.info("No chat history for this user.")
 
-# --- OBSERVABILITY TOGGLE ---
-st.sidebar.markdown("---")
-show_observability = st.sidebar.checkbox("Show Observability Dashboard", value=False)
+    with st.expander("Demo credentials"):
+        st.markdown(
+            "- alice.johnson@meridianglobal.example / password123 (employee)\n"
+            "- bob.smith@meridianglobal.example / password123 (manager)\n"
+            "- meera.iyer@meridianglobal.example / password123 (hr)\n"
+            "- vikram.singh@meridianglobal.example / password123 (finance)\n"
+            "- suresh.pillai@meridianglobal.example / password123 (it)\n"
+            "- cto.executive@meridianglobal.example / password123 (executive)\n"
+        )
 
-# --- MAIN UI: Chat or Observability ---
-if show_observability:
-    st.title("🛡️ AI Firewall Observability")
-    if not os.path.exists(LOG_FILE):
-        st.warning("No audit logs found.")
+
+def _render_sidebar():
+    user = st.session_state.user or {}
+    st.sidebar.markdown("### Signed in")
+    st.sidebar.markdown(f"**{user.get('name', '')}**")
+    st.sidebar.caption(f"Role: {user.get('role', '')}")
+    st.sidebar.caption(f"Department: {user.get('department', '')}")
+
+    if st.sidebar.button("Sign out", use_container_width=True):
+        _logout()
+        st.rerun()
+
+    st.sidebar.markdown("---")
+
+    if st.sidebar.button("New chat", use_container_width=True):
+        st.session_state.thread_id = str(uuid.uuid4())
+        st.session_state.messages = []
+        st.rerun()
+
+
+def _send_query(query: str) -> dict:
+    if not st.session_state.thread_id:
+        st.session_state.thread_id = str(uuid.uuid4())
+
+    payload = {
+        "query": query,
+        "thread_id": st.session_state.thread_id,
+    }
+    try:
+        r = requests.post(
+            f"{API_URL}/query",
+            json=payload,
+            headers=_auth_headers(),
+            timeout=60,
+        )
+    except requests.RequestException as e:
+        return {"status": "error", "response": f"Backend unreachable: {e}"}
+
+    if r.status_code == 401:
+        _logout()
+        st.rerun()
+        return {"status": "error", "response": "Session expired. Please sign in again."}
+
+    if r.status_code != 200:
+        return {"status": "error", "response": f"HTTP {r.status_code}"}
+
+    return r.json()
+
+
+def _render_message(role: str, content: str, meta: dict | None = None):
+    with st.chat_message(role):
+        st.markdown(content)
+        if meta:
+            request_id = meta.get("request_id", "")
+            status = meta.get("status", "")
+            citations = meta.get("citations") or []
+            if citations:
+                with st.expander(f"Sources ({len(citations)})"):
+                    for c in citations:
+                        doc_id = c.get("doc_id", "")
+                        title = c.get("title", "")
+                        version = c.get("version", "")
+                        section = c.get("section", "")
+                        line = f"**{doc_id}** — {title}"
+                        if version:
+                            line += f" (v{version})"
+                        if section:
+                            line += f", {section}"
+                        st.markdown(line)
+            if request_id:
+                st.caption(f"request_id: {request_id} | status: {status}")
+
+
+def _render_chat():
+    st.title("Chat")
+
+    for msg in st.session_state.messages:
+        _render_message(msg["role"], msg["content"], msg.get("meta"))
+
+    prompt = st.chat_input("Ask about HR, IT, or Finance policies...")
+    if not prompt:
+        return
+
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    _render_message("user", prompt)
+
+    with st.spinner("Thinking..."):
+        result = _send_query(prompt)
+
+    response_text = result.get("response") or result.get("final_answer") or ""
+    meta = {
+        "request_id": result.get("request_id", ""),
+        "status": result.get("status", ""),
+        "citations": result.get("citations", []),
+    }
+    st.session_state.messages.append({
+        "role": "assistant",
+        "content": response_text,
+        "meta": meta,
+    })
+    _render_message("assistant", response_text, meta)
+
+
+def _render_audit():
+    st.title("Audit log")
+    st.caption("Visible to HR and executive roles.")
+
+    user = st.session_state.user or {}
+    if user.get("role") not in ("hr", "executive"):
+        st.info("Your role does not have access to the audit log.")
+        return
+
+    try:
+        r = requests.get(f"{API_URL}/metrics", headers=_auth_headers(), timeout=10)
+        if r.status_code != 200:
+            st.error(f"Metrics unavailable (HTTP {r.status_code}).")
+            return
+        metrics = r.json()
+    except requests.RequestException as e:
+        st.error(f"Cannot fetch metrics: {e}")
+        return
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Total requests", metrics.get("total_requests", 0))
+    col2.metric("Blocked", metrics.get("blocked_count", 0))
+    col3.metric("Block rate %", metrics.get("block_rate_pct", 0.0))
+
+    lat = metrics.get("latency_ms", {})
+    col4, col5, col6, col7 = st.columns(4)
+    col4.metric("Avg latency ms", lat.get("avg", 0))
+    col5.metric("p50", lat.get("p50", 0))
+    col6.metric("p95", lat.get("p95", 0))
+    col7.metric("p99", lat.get("p99", 0))
+
+    cost = metrics.get("cost_usd", {})
+    st.markdown(f"**Total cost USD:** {cost.get('total', 0.0)}  ")
+    st.markdown(f"**Cost per query USD:** {cost.get('per_query', 0.0)}")
+
+    cache = metrics.get("cache", {})
+    if cache:
+        st.markdown(f"**Cache entries:** {cache.get('entries', 0)}")
+
+
+def main():
+    _init_state()
+
+    if not st.session_state.token:
+        _render_login()
+        return
+
+    _render_sidebar()
+
+    user = st.session_state.user or {}
+    is_admin = user.get("role") in ("hr", "executive")
+
+    if is_admin:
+        tab_chat, tab_audit = st.tabs(["Chat", "Audit"])
+        with tab_chat:
+            _render_chat()
+        with tab_audit:
+            _render_audit()
     else:
-        logs = []
-        with open(LOG_FILE, "r") as f:
-            for line in f:
-                if line.strip(): logs.append(json.loads(line))
-        if logs:
-            df = pd.DataFrame(logs)
-            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='s')
-            st.dataframe(df.sort_values('timestamp', ascending=False).head(50))
-            if len(df[df['blocked'] == True]) > 0:
-                st.bar_chart(df[df['blocked'] == True]['block_reason'].value_counts())
-            else:
-                st.success("No requests have been blocked!")
-else:
-    st.title(f"Enterprise AI Assistant ({user_id})")
-    
-    # Require switching to a thread that actually belongs to the user
-    if st.session_state.current_thread_id and st.session_state.chats.get(st.session_state.current_thread_id, {}).get("user_id") != user_id:
-        st.session_state.current_thread_id = None
-        
-    if not st.session_state.current_thread_id:
-        st.info("👈 Please click '+ New Chat' to start.")
-    else:
-        thread_id = st.session_state.current_thread_id
-        chat_data = st.session_state.chats[thread_id]
-        
-        # Display messages
-        for msg in chat_data["messages"]:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"])
-                
-        # Chat Input
-        if prompt := st.chat_input("Ask a question..."):
-            # Add user message to UI immediately
-            with st.chat_message("user"):
-                st.markdown(prompt)
-            chat_data["messages"].append({"role": "user", "content": prompt})
-            save_chats(st.session_state.chats)
-            
-            # Call API
-            with st.spinner("Analyzing with AI Firewall..."):
-                payload = {
-                    "user_id": user_id, 
-                    "query": prompt,
-                    "thread_id": thread_id
-                }
-                try:
-                    response = requests.post(API_URL, json=payload)
-                    if response.status_code == 200:
-                        data = response.json()
-                        bot_response = data["response"]
-                        if data["blocked"]:
-                            bot_response = f"**🚫 BLOCKED:** {data['reason']}\n\n{bot_response}"
-                            
-                        with st.chat_message("assistant"):
-                            st.markdown(bot_response)
-                        chat_data["messages"].append({"role": "assistant", "content": bot_response})
-                        save_chats(st.session_state.chats)
-                    else:
-                        st.error(f"API Error: {response.status_code}")
-                except Exception as e:
-                    st.error(f"Connection Error: {e} - Is the FastAPI server running?")
+        _render_chat()
+
+
+if __name__ == "__main__":
+    main()

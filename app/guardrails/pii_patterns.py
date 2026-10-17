@@ -1,6 +1,8 @@
+import logging
 import re
 from presidio_analyzer import AnalyzerEngine
 
+logger = logging.getLogger("guardrails.pii")
 analyzer = AnalyzerEngine()
 
 def detect_pii(text: str) -> bool:
@@ -19,10 +21,16 @@ def detect_pii(text: str) -> bool:
         "IP_ADDRESS"         
     ]
     
-    # Using Presidio to detect entities
-    results = analyzer.analyze(text=text, entities=entities_to_block, language='en')
-    
-    return len(results) > 0
+    try:
+        # Using Presidio to detect entities
+        results = analyzer.analyze(text=text, entities=entities_to_block, language='en')
+        return len(results) > 0
+    except Exception as exc:
+        logger.warning(
+            "pii_detection_failed chars=%d error=%s — failing open",
+            len(text), exc.__class__.__name__,
+        )
+        return False
 
 
 
