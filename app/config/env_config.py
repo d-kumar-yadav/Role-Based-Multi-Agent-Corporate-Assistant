@@ -45,3 +45,38 @@ if settings.ENV != "test":
         _missing.append("JWT_SECRET")
     if _missing:
         raise RuntimeError(f"Missing required env vars: {_missing}")
+    
+    
+    
+    # "env_config.py is a central config class that reads all environment variables from .env in one place, converts them to the right types (string → bool/int), sets safe defaults, and validates required secrets at startup. Every other file just imports settings and uses settings.GROQ_API_KEY etc. — clean, no duplication, and if a secret is missing, the app fails fast at startup instead of crashing mid-request.
+    
+    # Why not just use the .env file directly everywhere?
+
+# You could do this in every file:
+
+# python
+# # ❌ BAD — doing it everywhere directly
+# import os
+# # In main.py
+# cache = os.environ.get("RESPONSE_CACHE_ENABLED", "true").lower() == "true"
+# # In some_other_file.py
+# cache = os.environ.get("RESPONSE_CACHE_ENABLED", "true").lower() == "true"
+# # In another_file.py
+# cache = os.environ.get("RESPONSE_CACHE_ENABLED", "true").lower() == "true"
+
+# Problem: You've written the same thing 50 times across 50 files. If you rename the variable → you have to fix 50 places. If you change the default → fix 50 places.
+
+# What env_config.py solves — One place for everything
+# python
+# # ✅ GOOD — defined ONCE in env_config.py
+# class Settings:
+#     RESPONSE_CACHE_ENABLED: bool = os.environ.get("RESPONSE_CACHE_ENABLED", "true").lower() == "true"
+#     GROQ_API_KEY: str = os.environ.get("GROQ_API_KEY", "")
+#     JWT_SECRET: str = os.environ.get("JWT_SECRET", "")
+#     # ... all settings in one place
+# settings = Settings()
+# python
+# # Every other file just does:
+# from app.config.env_config import settings
+# cache = settings.RESPONSE_CACHE_ENABLED  # clean, simple, one line
+# key   = settings.GROQ_API_KEY
