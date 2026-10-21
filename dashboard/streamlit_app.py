@@ -7,28 +7,24 @@ import requests
 
 API_URL = os.getenv("API_URL", "http://localhost:8000")
 
-# Reuse the same metrics.db that already exists in your project
-_DB_PATH = os.path.join(os.path.dirname(__file__), "..", "logs", "metrics.db")
+_DB_PATH = os.path.join(os.path.dirname(__file__), "..", "logs", "chat_history.db")
 
-# _ prefix means it's private/internal (only used inside this file)
-@st.cache_resource  # keeps the DB connection alive across ALL Streamlit reruns
-def _get_db() -> sqlite3.Connection:    # it will return sqlite3 connection object and it will create a table if not exist
-    """Create the SQLite connection ONCE and reuse it forever across reruns."""
+@st.cache_resource
+def _get_db() -> sqlite3.Connection:
+    os.makedirs(os.path.dirname(_DB_PATH), exist_ok=True)
     conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
-    # SQLite by default only allows ONE thread to use it. Streamlit uses multiple threads, so this allows any thread to use the same connection safely
     conn.execute("""
             CREATE TABLE IF NOT EXISTS chat_history (
                 user_id   TEXT PRIMARY KEY,
-                threads   TEXT NOT NULL,        -- JSON blob of all threads
+                threads   TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
         """)
-    conn.commit() # it finally saved to db before it was just on RAM
+    conn.commit()
     return conn
 
 
 def _load_history(user_id: str) -> dict:
-    """Load saved threads from DB for this user. Returns {} if none found."""
     try:
         conn = _get_db()
         row = conn.execute(
@@ -42,7 +38,6 @@ def _load_history(user_id: str) -> dict:
 
 
 def _save_history(user_id: str, threads: dict) -> None:
-    """Upsert current threads into the DB for this user."""
     try:
         conn = _get_db()
         conn.execute("""
@@ -54,13 +49,15 @@ def _save_history(user_id: str, threads: dict) -> None:
         """, (user_id, json.dumps(threads, ensure_ascii=False)))
         conn.commit()
     except Exception:
-        pass  # never crash the UI because of a save failure
+        pass
+
 
 def _rerun():
-    if hasattr(st, "rerun"):  # hasattr= has attribute means does this object has this property/finction or not means here st is object and does this object has attribute rerun or not 
-        st.rerun() # it is called when ever page is refresh/reload
+    if hasattr(st, "rerun"):
+        st.rerun()
     else:
-        st.experimental_rerun()  # same it is just  older version  st.rerun
+        st.experimental_rerun()
+
 
 st.set_page_config(
     page_title="Enterprise Copilot", 
@@ -69,15 +66,12 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Minimal CSS - Adapts to Light & Dark mode natively
 st.markdown("""
 <style>
-    /* Hide default Streamlit menu, footer, and deploy button, but KEEP the sidebar toggle visible */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     [data-testid="stDeployButton"] {display: none;}
 
-    /* User Profile Card */
     .user-profile {
         background-color: var(--secondary-background-color);
         border: 1px solid rgba(128, 128, 128, 0.2);
@@ -97,7 +91,6 @@ st.markdown("""
         font-weight: 500; 
     }
     
-    /* Make sidebar history buttons look like a list */
     .stButton > button {
         text-align: left;
         justify-content: flex-start;
@@ -108,31 +101,21 @@ st.markdown("""
         background-color: rgba(128, 128, 128, 0.1);
     }
 </style>
-""", unsafe_allow_html=True) #unsafe_allow_html=True this tell render this as a raw html
-# unsafe_ = "Hey, you are taking responsibility here.
-#            If you pass user input into this HTML,
-#            a hacker could inject malicious scripts (XSS attack)."
+""", unsafe_allow_html=True)
 
-#this function _init_state run on every re run of stramlitt
+
 def _init_state():
     defaults = {
         "token": None, 
         "user": None, 
         "login_email": "alice.johnson@meridianglobal.example",
         "current_thread_id": str(uuid.uuid4()),
-        "threads": {} # Stores chat history: {thread_id: {"title": str, "messages": list}}
+        "threads": {}
     }
     for key, value in defaults.items():
         if key not in st.session_state:
             st.session_state[key] = value
-# First time app loads:
-#   session_state is empty {}
-#   → sets ALL defaults  ✅
 
-# User clicks a button (re-run):
-#   session_state already has token = "abc123"
-#   → "token" already exists → SKIP, don't overwrite ✅
-#   → keeps the real token, doesn't reset to None
 
 def _auth_headers():
     return {"Authorization": f"Bearer {st.session_state.token}"}
@@ -153,7 +136,7 @@ def _login(email: str, password: str) -> bool:
         st.error("Invalid email or password.")
         return False
 
-    st.session_state.token = r.json()["access_token"]  # r.json convert into python dict beacuse json is a text we cannot exess it 
+    st.session_state.token = r.json()["access_token"]
 
     try:
         me = requests.get(f"{API_URL}/auth/me", headers=_auth_headers(), timeout=10)
@@ -168,19 +151,19 @@ def _login(email: str, password: str) -> bool:
         st.session_state.token = None
         return False
 
-    # Load this user's full chat history from database
     user_id = st.session_state.user.get("user_id", "")
     saved_threads = _load_history(user_id)
-    if saved_threads:
-        st.session_state.threads = saved_threads
-        # Resume the last used thread
-        st.session_state.current_thread_id = list(saved_threads.keys())[-1]
-
+    st.session_state.threads = saved_threads or {}
+    
     return True
 
 
 def _logout():
-    # Save current threads to database before clearing session
+    st.session_state.threads = {
+        tid: data for tid, data in st.session_state.threads.items()
+        if len(data.get("messages", [])) > 0
+    }
+
     user = st.session_state.get("user") or {}
     user_id = user.get("user_id", "")
     if user_id and st.session_state.get("threads"):
@@ -195,7 +178,7 @@ def _logout():
 def _render_login():
     st.markdown("<br><br>", unsafe_allow_html=True)
     
-    col2 = st.columns([1, 2, 1])
+    _, col2, _ = st.columns([1, 2, 1])
     with col2:
         st.markdown("### Sign in")
         st.caption("Access internal HR, IT, and Finance policies.")
@@ -234,7 +217,6 @@ def _render_login():
 def _render_sidebar():
     user = st.session_state.user or {}
     
-    # 1. Brand & Profile
     st.sidebar.markdown("### Enterprise Copilot")
     
     role_title = user.get('role', '').title()
@@ -249,36 +231,39 @@ def _render_sidebar():
     </div>
     """, unsafe_allow_html=True)
     
-    # 2. New Chat Button
     if st.sidebar.button("➕ New Chat", use_container_width=True, type="primary"):
+        st.session_state.threads = {
+            tid: data for tid, data in st.session_state.threads.items()
+            if len(data.get("messages", [])) > 0
+        }
+        
+        user_id = user.get("user_id", "")
+        if user_id:
+            _save_history(user_id, st.session_state.threads)
+            
         st.session_state.current_thread_id = str(uuid.uuid4())
         _rerun()
 
     st.sidebar.divider()
     
-    # 3. Chat History List
     st.sidebar.caption("Chat History")
     
-    # Sort threads by newest first (based on dict insertion order)
     history = list(st.session_state.threads.items())[::-1] 
     
     if not history:
         st.sidebar.caption("*No past conversations*")
         
     for tid, thread_data in history:
-        # Highlight the currently active thread visually
         is_active = (tid == st.session_state.current_thread_id)
         prefix = "▶ " if is_active else "💬 "
         title = thread_data.get("title", "New Conversation")
         
-        # Truncate long titles
         display_title = (title[:22] + '...') if len(title) > 22 else title
         
         if st.sidebar.button(f"{prefix}{display_title}", key=f"hist_{tid}", use_container_width=True):
             st.session_state.current_thread_id = tid
             _rerun()
 
-    # 4. Sign Out at the very bottom
     st.sidebar.divider()
     if st.sidebar.button("Sign Out", use_container_width=True):
         _logout()
@@ -332,7 +317,6 @@ def _render_chat():
     st.caption("Ask questions about company policies. Answers are restricted by your role.")
     st.divider()
 
-    # Ensure current thread exists in state
     if st.session_state.current_thread_id not in st.session_state.threads:
         st.session_state.threads[st.session_state.current_thread_id] = {
             "title": "New Conversation",
@@ -341,25 +325,20 @@ def _render_chat():
 
     current_thread = st.session_state.threads[st.session_state.current_thread_id]
 
-    # Render history for this thread
     for msg in current_thread["messages"]:
         _render_message(msg["role"], msg["content"], msg.get("meta"))
 
-    # Input
     prompt = st.chat_input("Ask a question...")
     if not prompt:
         return
 
-    # If this is the first message, set the thread title to the prompt
     if len(current_thread["messages"]) == 0:
         current_thread["title"] = prompt
 
-    # Add user message
     current_thread["messages"].append({"role": "user", "content": prompt})
     _render_message("user", prompt)
 
-    # Fetch response
-    with st.spinner("Retrieving policy..."):
+    with st.spinner("Retrieving Answer..."):
         result = _send_query(prompt)
 
     response_text = result.get("response") or result.get("final_answer") or "No response generated."
@@ -369,7 +348,6 @@ def _render_chat():
         "status": result.get("status", ""),
     }
     
-    # Add assistant message
     current_thread["messages"].append({
         "role": "assistant",
         "content": response_text,
@@ -377,7 +355,6 @@ def _render_chat():
     })
     _render_message("assistant", response_text, meta)
 
-    # Auto-save history to database after every message
     user_id = (st.session_state.user or {}).get("user_id", "")
     if user_id:
         _save_history(user_id, st.session_state.threads)
