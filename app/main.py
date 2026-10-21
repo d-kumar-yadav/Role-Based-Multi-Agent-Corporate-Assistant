@@ -32,16 +32,12 @@ if _missing:
 
 app = FastAPI(title="Secure Agentic RAG Gateway", version="1.0.0")
 
-
 agent_graph = create_graph()
 
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
 
-
-
-# Depends() = FastAPI's Engine: Dependency injection that parses, validates, and hands the object over before the function runs
 @app.post("/auth/token")
 def login(form_data: OAuth2PasswordRequestForm = Depends()):
     user = get_user_by_email(form_data.username)
@@ -59,26 +55,21 @@ def me(user: User = Depends(get_current_user)):
         "role": user.role,
         "department": user.department,
     }
-# "Whatever this function returns, make sure it matches the QueryResponse shape before sending it back"
-# and listen to port query
+
 @app.post("/query", response_model=QueryResponse)
 async def handle_query(
-    request: QueryRequest, # FastAPI reads this → puts it into the QueryRequest object → gives it to you as request
-    response: Response,  #m let modifiy the http response
+    request: QueryRequest, 
+    response: Response,  
     user: User = Depends(get_current_user),
 ):
-    
-    request_id = uuid.uuid4().hex  #Every single request that hits your server gets its own unique ID and hex remove any hypen 
-    
-    response.headers["X-Request-ID"] = request_id #sends that unique ID back to the frontend inside the HTTP response headers.
-    
-    start_time = time.time() # to calcuate latency
-    
-    effective_thread_id = f"{user.user_id}:{request.thread_id or 'default'}" #Creates a unique conversation thread identifier combining user + thread.
+    request_id = uuid.uuid4().hex  
+    response.headers["X-Request-ID"] = request_id 
+    start_time = time.time() 
+    effective_thread_id = f"{user.user_id}:{request.thread_id or 'default'}" 
 
+    input_check = run_input_guardrails(request.query, user.role)
 
-    input_check = run_input_guardrails(request.query)
-
+    # 1. DIALOG CHECK (Greetings / Goodbyes)
     if input_check.get("is_dialog"):
         latency = time.time() - start_time
         log_request(
@@ -111,19 +102,25 @@ async def handle_query(
             citations=[],
         )
 
+    # 2. BLOCKED CHECK (Firewall)
+    # IMPORTANT: This is dedented to the correct level!
     if input_check["blocked"]:
         latency = time.time() - start_time
+        
+        # USE THE POLITE MESSAGE FROM THE FIREWALL
+        polite_msg = input_check.get("dialog_response") or "I apologize, but I cannot help with that request. I can only assist with HR, IT, and Finance questions."
+        
         log_request(
             request_id=request_id,
             user_id=user.user_id,
             role=user.role,
             query=request.query,
             blocked=True,
-            reason=input_check.get("reason", "blocked"),
+            reason=input_check["reason"],
             stage="input_blocked",
             latency_sec=latency,
-            final_response="",
-            block_stage=input_check.get("stage", ""),
+            final_response=polite_msg,
+            retrieved_docs_count=0,
         )
         record_request(
             request_id=request_id,
@@ -140,13 +137,12 @@ async def handle_query(
         return QueryResponse(
             request_id=request_id,
             status=QueryStatus.blocked,
-            response="Request blocked by security policies.",
+            response=polite_msg,
             citations=[],
         )
 
-    # # Cache check (only for non-dialog, non-blocked queries)
-    # "Cache is controlled via an environment variable RESPONSE_CACHE_ENABLED. The config class reads it from the .env file using os.environ.get() with a default of true. This means cache is on by default, but any developer or DevOps engineer can turn it off without touching code — just change the .env file and restart the server."
-    cache_enabled = settings.RESPONSE_CACHE_ENABLED  # chekc setting for chache
+    # 3. CACHE CHECK
+    cache_enabled = settings.RESPONSE_CACHE_ENABLED 
     if cache_enabled:
         cached_response = get_cached(request.query, user.role) 
         if cached_response is not None:
@@ -181,12 +177,13 @@ async def handle_query(
 
     response.headers["X-Cache"] = "MISS"
 
+    # 4. LANGGRAPH AGENTS
     state = {
         "query": request.query,
         "user_role": user.role,
         "user_departments": user.allowed_departments,
     }
-# "config is a LangGraph-specific dictionary that passes the conversation thread_id to the agent graph. LangGraph uses this to load the correct memory/checkpointer state for that specific conversation thread. Without it, the AI would have no memory between messages — every question would feel like a fresh conversation with no context from before.
+
     try:
         config = {"configurable": {"thread_id": effective_thread_id}}
         result_state = agent_graph.invoke(state, config=config)
@@ -196,7 +193,7 @@ async def handle_query(
         logger.exception(
             "agent_execution_failed request_id=%s error_id=%s",
             request_id, error_id,
-        )   # to see in terminal
+        ) 
         latency = time.time() - start_time
         err_msg = f"An internal error occurred. Reference: {error_id}"
         log_request(
@@ -229,6 +226,7 @@ async def handle_query(
             citations=[],
         )
 
+    # 5. OUTPUT GUARDRAILS
     retrieved_docs = result_state.get("retrieved_docs", [])
     output_check = run_output_guardrails(raw_answer, retrieved_docs)
     latency = time.time() - start_time
@@ -266,6 +264,7 @@ async def handle_query(
             citations=[],
         )
 
+    # 6. SUCCESS
     final_response = output_check["final_answer"]
     log_request(
         request_id=request_id,
@@ -297,6 +296,7 @@ async def handle_query(
 
     citations_data = result_state.get("citations", [])
     citations = [Citation(**c) for c in citations_data]
+    
     return QueryResponse(
         request_id=request_id,
         status=QueryStatus.answered,
@@ -304,13 +304,11 @@ async def handle_query(
         citations=citations,
     )
 
-
 @app.get("/metrics")
 def metrics_endpoint(window: str = "24h"):
     data = get_metrics(window=window)
     data["cache"] = cache_stats()
     return data
-
 
 @app.get("/metrics/prometheus")
 def metrics_prometheus():
@@ -319,35 +317,3 @@ def metrics_prometheus():
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
-
-
-
-
-# Incoming HTTP Request (POST /auth/token)
-#            │
-#            ▼
-# FastAPI encounters `Depends(OAuth2PasswordRequestForm)`
-#            │
-#            ├─► 1. Intercepts the request
-#            ├─► 2. Reads the form data (`username` and `password`)
-#            ├─► 3. Validates the data (checks required fields, data types)
-#            │      └── If invalid/missing ──► Returns HTTP 422 Unprocessable Entity
-#            │                                 (Your `login()` never runs!)
-#            │
-#            ▼ (If valid)
-# FastAPI creates `form_data` object
-#            │
-#            ▼
-# FastAPI passes `form_data` as an argument into `login(form_data)`
-#            │
-#            ▼
-# Your `login()` function body starts executing!
-
-# "Yes, exactly. Depends() acts as an interceptor / pre-hook. Before the endpoint function executes, FastAPI runs whatever is inside Depends(). If parsing or validation fails, FastAPI immediately returns an error response and my endpoint code is never even touched. If it succeeds, the output is passed directly into my function's parameters."
-
-# In this line, I’m using FastAPI’s Dependency Injection mechanism with Depends() to extract and validate standard OAuth2 credentials.
-
-# OAuth2PasswordRequestForm tells FastAPI to expect incoming requests as application/x-www-form-urlencoded form data containing a username and password field, exactly as specified in the OAuth2 password grant standard.
-
-# Instead of manually writing boilerplate code to parse form fields, validate MIME types, or return 422 Unprocessable Entity errors, FastAPI handles the extraction and validation behind the scenes and injects the populated form_data object directly into my function."
