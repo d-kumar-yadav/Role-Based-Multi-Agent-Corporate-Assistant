@@ -9,23 +9,22 @@ API_URL = os.getenv("API_URL", "http://localhost:8000")
 
 # Reuse the same metrics.db that already exists in your project
 _DB_PATH = os.path.join(os.path.dirname(__file__), "..", "logs", "metrics.db")
-_db_conn = None
 
-
-def _get_db() -> sqlite3.Connection:
-    """Get (or create) the SQLite connection and ensure the chat_history table exists."""
-    global _db_conn
-    if _db_conn is None:
-        _db_conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
-        _db_conn.execute("""
+# _ prefix means it's private/internal (only used inside this file)
+@st.cache_resource  # keeps the DB connection alive across ALL Streamlit reruns
+def _get_db() -> sqlite3.Connection:    # it will return sqlite3 connection object and it will create a table if not exist
+    """Create the SQLite connection ONCE and reuse it forever across reruns."""
+    conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
+    # SQLite by default only allows ONE thread to use it. Streamlit uses multiple threads, so this allows any thread to use the same connection safely
+    conn.execute("""
             CREATE TABLE IF NOT EXISTS chat_history (
                 user_id   TEXT PRIMARY KEY,
                 threads   TEXT NOT NULL,        -- JSON blob of all threads
                 updated_at TEXT NOT NULL
             )
         """)
-        _db_conn.commit()
-    return _db_conn
+    conn.commit() # it finally saved to db before it was just on RAM
+    return conn
 
 
 def _load_history(user_id: str) -> dict:
