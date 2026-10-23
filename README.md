@@ -43,38 +43,62 @@ If you are reviewing this project, here are the best queries to test the differe
 
 ---
 
-## 📊 Evaluation Results
+## 🏗️ System Architecture
 
-Measured on a 60-query evaluation set (30 golden, 20 red team, 10 unauthorized).
-
-| Category | Metric | Value |
-|---|---|---|
-| **Golden QA (30)** | Retrieval precision | **93.3%** (28/30) |
-| | Answer correctness | **93.3%** (28/30) |
-| **Red Team (20)** | Overall block rate | **100%** (20/20) |
-| | Jailbreak | 100% (5/5) |
-| | Off-topic | 100% (5/5) |
-| | Sensitive-topic | 100% (5/5) |
-| | Social engineering | 100% (5/5) |
-| **Unauthorized (10)** | Refusal rate | **100%** (10/10) |
-
-*Note: p50 latency is currently ~26s on the Groq free tier due to strict per-minute token limits. On a paid inference tier, latency drops to 3-5s.*
-
----
-
-## 📂 Project Structure
+The system is designed in 6 distinct layers. Here is the exact flow of a user query:
 
 ```text
-ai-firewall/
-├── app/                  # Core backend logic
-│   ├── agents/           # LangGraph orchestration & AI agents
-│   ├── guardrails/       # Input firewall & output safety checks
-│   ├── rag/              # Ingestion, hybrid retrieval, and embeddings
-│   ├── auth/             # JWT authentication & RBAC dependencies
-│   └── main.py           # FastAPI entrypoint
-├── data/                 # Markdown policy documents (HR, IT, Finance)
-├── dashboard/            # Streamlit frontend UI
-├── docs/                 # Detailed architecture and design docs
-├── tests/                # Pytest unit & integration tests
-├── scripts/              # Debugging utilities
-└── requirements.txt      # Python dependencies
+👤 USER (JWT-Authenticated Request)
+ │
+ ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ 1. INPUT FIREWALL (Security Layer)                                     │
+│  Stage 1: Regex Filter (Jailbreak patterns)                            │
+│  Stage 2: PII Detection (Presidio - blocks SSNs/Credit Cards)          │
+│  Stage 3: Dialog Router (MiniLM - instant "hello"/"goodbye")           │
+│  Stage 4: Off-Topic Check (Embedding similarity)                       │
+│  Stage 5: Role-Aware LLM Firewall (Groq gpt-oss-20b)                   │
+└────────────────────────────────────────────────────────────────────────┘
+ │ (If Safe)
+ ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ 2. ROUTING & EXPANSION                                                 │
+│  • Query Expansion: Generates 2 alternative phrasings (cached)         │
+│  • Domain Router: Keyword matching to classify HR, IT, or Finance      │
+└────────────────────────────────────────────────────────────────────────┘
+ │
+ ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ 3. HYBRID RETRIEVAL (Qdrant Vector DB)                                 │
+│  • Dense Search: BAAI/bge-small-en-v1.5 (Semantic meaning)             │
+│  • Sparse Search: BM25 (Exact keyword/ID matching)                     │
+│  • RBAC Filter: Enforced natively (blocks unauthorized access_levels)  │
+│  • Reranker: Cross-Encoder (bge-reranker-base) sorts best 5 chunks     │
+└────────────────────────────────────────────────────────────────────────┘
+ │
+ ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ 4. MULTI-AGENT EXECUTION (LangGraph)                                   │
+│  • Fan-Out: Cross-domain queries run HR, IT, and Finance in parallel   │
+│  • Agents: Groq gpt-oss-20b generates cited answers per domain         │
+│  • Synthesizer: Merges parallel answers into one cohesive response     │
+└────────────────────────────────────────────────────────────────────────┘
+ │
+ ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ 5. OUTPUT GUARDRAILS                                                   │
+│  • Toxicity Check: Keyword filter                                      │
+│  • Tiered Groundedness: Regex anchors (blocks) + NLI (logs only)       │
+│  • PII Redaction: Presidio (fails open to prevent breaking answers)    │
+└────────────────────────────────────────────────────────────────────────┘
+ │
+ ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ 6. OBSERVABILITY (Background)                                          │
+│  • Hash-Chained Audit Log (tamper-evident)                             │
+│  • SQLite Metrics DB (latency, tokens, cost)                           │
+│  • Prometheus Exporter (/metrics)                                      │
+└────────────────────────────────────────────────────────────────────────┘
+ │
+ ▼
+✅ FINAL RESPONSE (with citations)
