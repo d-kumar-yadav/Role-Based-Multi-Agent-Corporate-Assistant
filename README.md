@@ -8,7 +8,7 @@ Meridian AccessPilot demonstrates a security-focused Retrieval-Augmented Generat
 
 - [Problem Statement](#-problem-statement)
 - [Key Features](#-key-features)
-- [System Architecture](#-system-architecture)
+- [System Architecture](#system-architecture)
 - [Security Model](#️-security-model)
 - [Evaluation Results](#-evaluation-results)
 - [LLM Usage and Model Selection](#-llm-usage-and-model-selection)
@@ -45,7 +45,7 @@ Meridian AccessPilot addresses these challenges by combining permission-aware re
 
 ---
 
-## 🏗️ System Architecture
+## System Architecture
 
 The system processes each user query through six logical layers, from authentication and input validation to retrieval, agent execution, output verification, and observability.
 
