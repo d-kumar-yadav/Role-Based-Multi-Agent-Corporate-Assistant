@@ -1,4 +1,4 @@
-# Meridian AccessPilot — Enterprise RBAC-Aware Multi-Agent Copilot
+#  Enterprise RBAC-Aware Multi-Agent Copilot
 
 An enterprise AI assistant that answers employee HR, IT, and Finance questions using internal policy documents while enforcing role-based access control (RBAC), blocking unsafe queries, and producing grounded, cited responses.
 
