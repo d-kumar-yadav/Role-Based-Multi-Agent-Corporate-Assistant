@@ -1,30 +1,28 @@
 # Meridian AccessPilot — Enterprise RBAC-Aware Multi-Agent Copilot
 
-An enterprise AI assistant that answers employee HR, IT, and Finance
-questions while enforcing role-based access control, blocking unsafe
-queries, and producing cited, grounded answers.
+An enterprise AI assistant that answers employee HR, IT, and Finance questions while enforcing strict role-based access control, blocking unsafe queries, and producing cited, grounded answers.
 
-Built as a demonstration of production-grade RAG design: layered safety
-gates, tiered groundedness verification, multi-agent fan-out for
-cross-functional queries, and a full audit trail.
+Built as a demonstration of production-grade RAG design: layered safety gates, tiered groundedness verification, multi-agent fan-out for cross-functional queries, and a full audit trail.
 
 ## Problem
 
-Enterprise employees waste hours searching for policy answers across
-scattered document systems, raising IT/HR tickets for questions already
-answered in a policy document, and waiting on approvals that could be
-routed automatically. Meanwhile, naive AI assistants introduce two new
-risks: data leakage across access boundaries, and confident hallucinations
-of policy details that don't exist.
+Enterprise employees waste hours searching for policy answers across scattered document systems, raising IT/HR tickets for questions already answered in a policy document, and waiting on approvals that could be routed automatically. 
 
-This project addresses both: a copilot that answers employee questions
-from internal policy documents with strict access control, cited sources,
-and measured safety behavior.
+Meanwhile, naive AI assistants introduce two new risks: **data leakage across access boundaries**, and **confident hallucinations** of policy details that don't exist. This project addresses both: a copilot that answers employee questions from internal policy documents with strict access control, cited sources, and measured safety behavior.
+
+## Features
+
+- **Chunk-Level RBAC**: Employees only retrieve documents their role is authorized to see (enforced natively in Qdrant).
+- **Multi-Agent Fan-Out**: Cross-functional queries (e.g., "WFH monitor reimbursement") are routed to IT and Finance agents in parallel, then synthesized.
+- **Tiered Groundedness**: Deterministic checks block hallucinations, while ML signals (NLI) log to the audit trail without blocking valid answers.
+- **5-Stage Input Firewall**: Regex, Presidio (PII), MiniLM (dialog), embedding similarity, and a Role-Aware LLM classifier.
+- **Persistent Chat History**: SQLite-backed frontend with multi-thread support and user profile management.
+- **Observability**: Hash-chained audit logs, Prometheus metrics, and a restricted HR/Executive dashboard.
+- **Zero External Vector DB Dependencies**: Can run fully locally with embedded Qdrant.
 
 ## Evaluation Results
 
-Measured on a 60-query evaluation set (30 golden, 20 red team,
-10 unauthorized).
+Measured on a 60-query evaluation set (30 golden, 20 red team, 10 unauthorized).
 
 | Category | Metric | Value |
 |---|---|---|
@@ -36,150 +34,49 @@ Measured on a 60-query evaluation set (30 golden, 20 red team,
 | | Sensitive-topic | 100% (5/5) |
 | | Social engineering | 100% (5/5) |
 | Unauthorized (10) | Refusal rate | **100%** (10/10) |
-| Performance | p50 latency | 26.4s (free-tier) |
-| | p95 latency | 46.4s (free-tier) |
 
-**Note on latency:** On a paid inference tier, latency drops to 3-5s
-p50. The free-tier latency reflects per-minute token limits, not
-architectural cost. See `docs/KNOWN_LIMITATIONS.md`.
+**Note on latency:** p50 latency is currently ~26s on the Groq free tier due to strict per-minute token limits. On a paid inference tier, latency drops to 3-5s p50. See `docs/KNOWN_LIMITATIONS.md`.
+
+## Engineering Highlights (Hard Bugs Solved)
+
+Building a RAG pipeline is easy; making it secure and reliable is hard. Here are the critical edge cases discovered and fixed during development:
+
+1. **The Stale Cache Data Leak**: After updating the RBAC rules to separate Finance-only memos from general policies, an employee test account still received restricted revenue figures. Root cause: A stale cache hit. The system served the answer generated *before* the security rule was applied. Fix: Implemented a cache invalidation strategy and moved the RBAC filter upstream.
+2. **Mixed-Content RBAC Failure**: A Finance policy file contained both general expense rules (for everyone) and executive memos (for Finance only). Tagging the whole file as `internal` caused a leak. Fix: Split the corpus into `FIN-POLICY-001.md` (internal) and `FIN-MEMOS-001.md` (finance_only).
+3. **Groundedness False Positives**: The NLI groundedness model was blocking valid answers because it misclassified corporate policy language. Fix: Redesigned into a two-tier system where deterministic regex blocks hard failures, while ML signals only inform the audit log.
+4. **Unicode Regex Failures**: The LLM consistently generated fullwidth brackets (`【 】`) and non-breaking spaces (`\u202f`), which broke exact-match citation regex. Fix: Built a Unicode canonicalization layer before every verification step.
 
 ## Architecture
 
-    User Request (JWT-authenticated)
-      |
-    [Input Guardrails — 5 stages]
-      Regex jailbreak filter
-      PII detection (Presidio)
-      Dialog classifier (MiniLM embeddings)
-      Off-topic embedding check
-      LLM firewall (gpt-oss-20b)
-      |
-    [Query Expansion] (cached, gpt-oss-120b)
-      |
-    [Router] — keyword domain classification (no LLM)
-      |
-    [Retriever]
-      Hybrid search: BGE-small dense + BM25 sparse
-      Qdrant RBAC filter (access_level + roles)
-      Cross-encoder reranker (bge-reranker-base)
-      |
-    [Fan-out] — parallel agents per domain
-      HR Agent | IT Agent | Finance Agent
-      |
-    [Synthesizer] — merge multi-domain answers
-      |
-    [Output Guardrails]
-      Toxicity keyword check
-      Tiered groundedness verification
-      PII redaction (fails open)
-      |
-    [Response with citations]
-      |
-    [Audit Log — hash-chained] + [Metrics DB — SQLite]
-
-## LLM Usage
-
-LLMs are used only where reasoning is required. Every other component
-is deterministic code.
-
-| Query type | LLM calls | Where |
-|---|---|---|
-| Dialog ("hello") | 0 | Canned responses |
-| Single-domain | 2 | Input firewall + domain agent |
-| Cross-domain | 3-4 | Firewall + 2 agents + synthesizer |
-| Cache hit | 0 | LRU response cache |
-
-See `docs/ARCHITECTURE.md` for the complete LLM usage map.
-
-## Model Selection
-
-| Component | Model | Purpose |
-|---|---|---|
-| Dialog routing | all-MiniLM-L6-v2 | Fast 5-class intent classification |
-| Document retrieval | BAAI/bge-small-en-v1.5 | 384-dim dense embeddings |
-| Sparse retrieval | Qdrant/BM25 | Keyword matching for exact terms |
-| Reranking | BAAI/bge-reranker-base | Cross-encoder precision rerank |
-| Groundedness signal | cross-encoder/nli-deberta-v3-base | NLI entailment scoring |
-| PII detection | en_core_web_md (spaCy) | Named entity recognition |
-| Input firewall | gpt-oss-20b (Groq) | Fast safety classification |
-| Agent reasoning | gpt-oss-20b (Groq) | Answer generation |
-
-Chosen for a balance of accuracy, latency, and free-tier cost. All
-local models run on CPU without GPU.
-
-## Groundedness Design
-
-The groundedness pipeline is two-tiered:
-
-- **Tier 1 (blocks):** citation verification, majority anchor failure,
-  input regex, PII detection, RBAC filters. Deterministic. No false
-  positives in practice.
-- **Tier 2 (informs):** NLI entailment scoring, partial anchor mismatch.
-  ML-based. Logged to audit trail, never gates a response.
-
-This design eliminates the false-positive problem that binary
-groundedness blocking created. See `docs/GROUNDEDNESS_DESIGN.md`
-for the full design rationale.
-
-## Quick Start (Local)
-
-Requirements:
-- Python 3.11+
-- Groq API key (free tier works)
-
-    # 1. Set up virtual environment
-    python -m venv venv
-    venv\Scripts\activate
-
-    # 2. Install dependencies
-    pip install -r requirements.txt
-
-    # 3. Configure environment
-    cp .env.example .env
-    # Edit .env and set GROQ_API_KEY and FIREWALL_GROQ_API_KEY
-
-    # 4. Ingest policy documents into Qdrant
-    python -m app.rag.ingest --reset
-
-    # 5. Start the backend (Terminal 1)
-    uvicorn app.main:app --host 0.0.0.0 --port 8000
-
-    # 6. Start the frontend (Terminal 2)
-    streamlit run dashboard/streamlit_app.py --server.port 8501
-
-Backend runs at http://localhost:8000
-Frontend runs at http://localhost:8501
-
-## Security Model
-
-- **Authentication:** JWT with per-user role and department claims
-- **Authorization:** Qdrant native filter applied before retrieval
-- **Input safety:** 5-stage pipeline from regex to LLM classifier
-- **Output safety:** Tiered groundedness, PII redaction
-- **Audit:** Hash-chained, tamper-evident log with PII redaction
-- **Thread isolation:** Thread IDs namespaced per user
-
-## Documentation
-
-- `docs/ARCHITECTURE.md` — system design and LLM usage map
-- `docs/EVALUATION.md` — eval methodology and results
-- `docs/GROUNDEDNESS_DESIGN.md` — groundedness design decision
-- `docs/KNOWN_LIMITATIONS.md` — honest limitations and future work
-- `docs/PHASE_11_SUMMARY.md` — Phase 11 stabilization report
-
-## Known Limitations
-
-This is a demonstration system, not a production deployment. See
-`docs/KNOWN_LIMITATIONS.md` for the full list. Key items:
-
-- Latency reflects Groq free-tier rate limits
-- Answer correctness uses citation subset matching, not semantic
-  similarity
-- Response cache is per (query, role), not per (query, role,
-  department)
-- Cross-domain latency is roughly 2x single-domain
-
-## License
-
-Not licensed for production use. Educational and portfolio purposes only.
-
+```text
+User Request (JWT-authenticated)
+  |
+[Input Guardrails — 5 stages]
+  Regex jailbreak filter
+  PII detection (Presidio)
+  Dialog classifier (MiniLM embeddings)
+  Off-topic embedding check
+  Role-aware LLM firewall (gpt-oss-20b)
+  |
+[Query Expansion] (cached)
+  |
+[Router] — keyword domain classification (no LLM)
+  |
+[Retriever]
+  Hybrid search: BGE-small dense + BM25 sparse
+  Qdrant RBAC filter (access_level + roles)
+  Cross-encoder reranker (bge-reranker-base)
+  |
+[Fan-out] — parallel agents per domain
+  HR Agent | IT Agent | Finance Agent
+  |
+[Synthesizer] — merge multi-domain answers
+  |
+[Output Guardrails]
+  Toxicity keyword check
+  Tiered groundedness verification
+  PII redaction (fails open)
+  |
+[Response with citations]
+  |
+[Audit Log — hash-chained] + [Metrics DB — SQLite]
