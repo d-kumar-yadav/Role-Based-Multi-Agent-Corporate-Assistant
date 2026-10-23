@@ -8,7 +8,7 @@ Meridian AccessPilot demonstrates a security-focused Retrieval-Augmented Generat
 
 - [Problem Statement](#-problem-statement)
 - [Key Features](#-key-features)
-- [System Architecture](#system-architecture)
+- [System Architecture](#System-architecture)
 - [Security Model](#️-security-model)
 - [Evaluation Results](#-evaluation-results)
 - [LLM Usage and Model Selection](#-llm-usage-and-model-selection)
