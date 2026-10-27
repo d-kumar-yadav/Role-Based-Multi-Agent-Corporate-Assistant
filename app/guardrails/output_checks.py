@@ -24,7 +24,8 @@ def redact_pii(text: str) -> tuple[str, bool, list]:
     try:
         results = analyzer.analyze(text=text, entities=entities_to_redact, language='en')
         anonymized_result = anonymizer.anonymize(text=text, analyzer_results=results)
-        pii_found = len(results) > 0
+       if pii_found:
+            logger.info("pii_detected count=%d entities=%s", len(results), detected_entities)
         detected_entities = list(set([r.entity_type for r in results]))
         anonymized_text = anonymized_result.text if (anonymized_result and anonymized_result.text) else text
         return anonymized_text, pii_found, detected_entities
