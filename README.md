@@ -437,6 +437,9 @@ Production deployment also requires review of secrets management, credential rot
 
 ---
 
+<img width="3003" height="8192" alt="Untitled diagram-2026-10-19-131713" src="https://github.com/user-attachments/assets/7f253bab-5cca-4266-a340-a882f37b4235" />
+
+
 ## 🎯 Project Objective
 
 Meridian AccessPilot demonstrates how enterprise AI assistants can combine retrieval quality, access control, agent orchestration, grounded generation, and observability in a single application.
