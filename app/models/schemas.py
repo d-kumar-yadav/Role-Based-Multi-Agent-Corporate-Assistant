@@ -32,3 +32,12 @@ class QueryResponse(BaseModel):
     status: QueryStatus
     response: str
     citations: list[Citation] = []
+
+
+class SignupRequest(BaseModel):
+    email: str
+    password: str
+    name: str
+    role: str = "employee"
+    department: str = "Sales"
+

@@ -17,6 +17,30 @@ USERS_BY_ID: dict[str, User] = {u['user_id']: User(**u) for u in _USERS_DATA}
 USERS_BY_EMAIL: dict[str, User] = {u['email'].lower(): User(**u) for u in _USERS_DATA}
 USERS_BY_EMAIL['cto.executive@meridianglobal.example'] = USERS_BY_ID['E6001']
 USERS_BY_EMAIL['cfo.executive@meridianglobal.example'] = USERS_BY_ID['E6002']
+if 'E6000' in USERS_BY_ID:
+    USERS_BY_EMAIL['ceo.executive@meridianglobal.example'] = USERS_BY_ID['E6000']
+    USERS_BY_EMAIL['ceo@meridianglobal.example'] = USERS_BY_ID['E6000']
+
+USER_PASSWORDS: dict[str, str] = {}
+
+def get_user_password_hash(email: str) -> str | None:
+    return USER_PASSWORDS.get(email.strip().lower())
+
+def save_user(user: User, password_hash: str | None = None):
+    USERS_BY_ID[user.user_id] = user
+    USERS_BY_EMAIL[user.email.strip().lower()] = user
+    if password_hash:
+        USER_PASSWORDS[user.email.strip().lower()] = password_hash
+    try:
+        p = Path('data') / 'structured' / 'employees.json'
+        if p.exists():
+            with open(p, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+            data.append(user.model_dump())
+            with open(p, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2)
+    except Exception:
+        pass
 
 def get_user_by_email(email: str) -> User | None:
     return USERS_BY_EMAIL.get(email.strip().lower())

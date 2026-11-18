@@ -15,13 +15,11 @@ from .validator_node import validator_node
 
 class AgentState(TypedDict):
     query: str
+    turn_id: str                  
     user_role: str
-    user_departments: list[str]
+    user_departments: list[str]   # allowed department
     domains: list[str]
-    domain: str
-    context: str
     retrieved_docs: list[dict]
-    retrieved_docs_count: int
     partial_answers: Annotated[list[dict], operator.add]
     synthesized_doc_ids: list[str]
     citations: list[dict]
@@ -29,9 +27,12 @@ class AgentState(TypedDict):
     final_answer: str
 
 
+VALID_DOMAINS = {"hr", "finance", "it"}  # NEW
+
+
 def route_to_agents(state):
-    domains = state.get("domains", ["hr"])
-    return [f"{d}_agent" for d in domains]
+    domains = [d for d in (state.get("domains") or []) if d in VALID_DOMAINS]  # NEW
+    return [f"{d}_agent" for d in domains] or ["synthesizer"]  # NEW: never an empty list
 
 
 def create_graph():
@@ -58,6 +59,7 @@ def create_graph():
             "hr_agent": "hr_agent",
             "finance_agent": "finance_agent",
             "it_agent": "it_agent",
+            "synthesizer": "synthesizer",   # NEW
         },
     )
 
@@ -70,7 +72,32 @@ def create_graph():
     workflow.add_edge("validator", END)
 
     db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "long_term_memory.db")
+    # 2. Open an SQLite connection:
     conn = sqlite3.connect(db_path, check_same_thread=False)
+    # 3. Create the SQLite Checkpointer:
     memory = SqliteSaver(conn)
 
     return workflow.compile(checkpointer=memory)
+# finds the answer, and the checkpointer saves the answer and document IDs under thread_id="alice:chat_1".
+# [User Query Arrives]
+#         │
+#         ▼
+#    Node: "router" executes 
+#         │
+#         ├──► 💾 CHECKPOINT 1 saved to SQLite: {"domains": ["hr"]}
+#         ▼
+#    Node: "retriever" executes
+#         │
+#         ├──► 💾 CHECKPOINT 2 saved to SQLite: {..., "retrieved_docs": [...]}
+#         ▼
+#    Node: "hr_agent" executes (calls Groq LLM)
+#         │
+#         ├──► 💾 CHECKPOINT 3 saved to SQLite: {..., "partial_answers": [...]}
+#         ▼
+#    Node: "synthesizer" executes
+#         │
+#         ├──► 💾 CHECKPOINT 4 saved to SQLite: {..., "answer": "...", "citations": [...]}
+#         ▼
+#    Node: "validator" executes
+#         │
+#         └──► 💾 CHECKPOINT 5 (Final) saved to SQLite: {"final_answer": "..."}

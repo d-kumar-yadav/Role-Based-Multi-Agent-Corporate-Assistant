@@ -1,3 +1,14 @@
+---
+title: Meridian Copilot AI Gateway
+emoji: 🛡️
+colorFrom: blue
+colorTo: indigo
+sdk: gradio
+sdk_version: 4.44.1
+app_file: hf_app.py
+pinned: false
+---
+
 # Meridian AccessPilot — Enterprise RBAC-Aware Multi-Agent Copilot
 
 An enterprise AI assistant that answers employee HR, IT, and Finance

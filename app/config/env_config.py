@@ -7,9 +7,10 @@ load_dotenv()
 
 class Settings:
     # Required (fail at import if missing)
-    MODEL: str = os.environ.get("MODEL", "llama-3.3-70b-versatile")
-    FIREWALL_MODEL: str = os.environ.get("FIREWALL_MODEL", "llama-3.1-8b-instant")
-    ROUTER_MODEL: str = os.environ.get("ROUTER_MODEL", "llama-3.1-8b-instant")
+    MODEL: str = os.environ.get("MODEL", "openai/gpt-oss-20b")
+    FIREWALL_MODEL: str = os.environ.get("FIREWALL_MODEL", "openai/gpt-oss-20b")
+    ROUTER_MODEL: str = os.environ.get("ROUTER_MODEL", "openai/gpt-oss-20b")
+    EXPAND_MODEL: str = os.environ.get("EXPAND_MODEL", "openai/gpt-oss-20b")
 
     GROQ_API_KEY: str = os.environ.get("GROQ_API_KEY", "")
     FIREWALL_GROQ_API_KEY: str = os.environ.get("FIREWALL_GROQ_API_KEY", "")
@@ -28,11 +29,13 @@ class Settings:
 
 settings = Settings()
 
-# Module-level aliases for backward compatibility with existing imports
 # Module-level aliases for backward compatibility
 MODEL = settings.MODEL
 FIREWALL_MODEL = settings.FIREWALL_MODEL
 ROUTER_MODEL = settings.ROUTER_MODEL
+EXPAND_MODEL = settings.EXPAND_MODEL
+GROQ_API_KEY = settings.GROQ_API_KEY
+FIREWALL_GROQ_API_KEY = settings.FIREWALL_GROQ_API_KEY
 
 # Validate required vars only when ENV != "test"
 if settings.ENV != "test":

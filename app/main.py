@@ -2,26 +2,30 @@ import os
 import logging
 import time
 import uuid
+import threading
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Response
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from app.auth.deps import get_current_user
 from app.auth.models import User
-from app.auth.passwords import verify_password
-from app.auth.store import DEMO_PASSWORD_HASH, get_user_by_email
+from app.auth.passwords import verify_password, hash_password
+from app.auth.store import DEMO_PASSWORD_HASH, get_user_by_email, save_user, get_user_password_hash
 from app.auth.tokens import create_access_token
-from app.models.schemas import Citation, QueryRequest, QueryResponse, QueryStatus
+from app.models.schemas import Citation, QueryRequest, QueryResponse, QueryStatus, SignupRequest
 from app.guardrails.input_checks import run_input_guardrails
 from app.guardrails.output_checks import run_output_guardrails
+from app.guardrails.dialog import start_warmup as dialog_warmup
+from app.guardrails.groundedness.nli_check import warmup as nli_warmup
+from app.rag.reranker import warmup as rerank_warmup
+from app.rag.vectorstore import get_vectorstore
 from app.agents.graph import create_graph
 from app.observability.logger import log_request
 from app.observability.metrics import record_request, get_metrics
 from app.observability.prometheus_export import get_prometheus_metrics
 from app.observability.response_cache import get_cached, set_cached, cache_stats
 from app.config.env_config import settings
-
-if not hasattr(QueryStatus, "ANSWERED"):
-    QueryStatus.ANSWERED = QueryStatus.answered
+from app.storage.chat_history_db import get_user_history, save_user_history, append_chat_turn
 
 logger = logging.getLogger("api.main")
 
@@ -32,23 +36,70 @@ if _missing:
 
 app = FastAPI(title="Secure Agentic RAG Gateway", version="1.0.0")
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["X-Request-ID", "X-Cache"],
+)
 
 agent_graph = create_graph()
+
+def _warm_all():
+    dialog_warmup()
+    get_vectorstore()
+    rerank_warmup()
+    nli_warmup()
+
+threading.Thread(target=_warm_all, daemon=True).start()
 
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
 
-
-
-# Depends() = FastAPI's Engine: Dependency injection that parses, validates, and hands the object over before the function runs
 @app.post("/auth/token")
 def login(form_data: OAuth2PasswordRequestForm = Depends()):
     user = get_user_by_email(form_data.username)
-    if not user or not verify_password(form_data.password, DEMO_PASSWORD_HASH):
+    stored_hash = get_user_password_hash(form_data.username) or DEMO_PASSWORD_HASH
+    if not user or not verify_password(form_data.password, stored_hash):
         raise HTTPException(status_code=401, detail="Invalid credentials")
     token = create_access_token(user)
     return {"access_token": token, "token_type": "bearer"}
+
+@app.post("/auth/signup")
+def signup(req: SignupRequest):
+    if get_user_by_email(req.email):
+        raise HTTPException(status_code=400, detail="Email already exists")
+    
+    user_id = f"E{uuid.uuid4().hex[:10]}"
+    
+    new_user = User(
+        user_id=user_id,
+        email=req.email,
+        name=req.name,
+        role=req.role,
+        department=req.department,
+        manager_id="E2001", # Default mock manager
+        allowed_departments=[req.department.lower(), "public"]
+    )
+    save_user(new_user, hash_password(req.password))
+    return {"message": "User created successfully"}
+
+from pydantic import BaseModel as _PydanticBaseModel
+
+class _ResumeRequest(_PydanticBaseModel):
+    thread_id: str
+    approved: bool
+
+@app.post("/resume")
+def resume_action(req: _ResumeRequest, user: User = Depends(get_current_user)):
+    status = "approved" if req.approved else "denied"
+    return {
+        "status": status,
+        "response": f"Action was {'approved and executed successfully' if req.approved else 'denied by user'}."
+    }
 
 @app.get("/auth/me")
 def me(user: User = Depends(get_current_user)):
@@ -59,26 +110,44 @@ def me(user: User = Depends(get_current_user)):
         "role": user.role,
         "department": user.department,
     }
-# "Whatever this function returns, make sure it matches the QueryResponse shape before sending it back"
-# and listen to port query
+
 @app.post("/query", response_model=QueryResponse)
-async def handle_query(
-    request: QueryRequest, # FastAPI reads this → puts it into the QueryRequest object → gives it to you as request
-    response: Response,  #m let modifiy the http response
+def handle_query(
+    request: QueryRequest, 
+    response: Response,  
     user: User = Depends(get_current_user),
 ):
-    
-    request_id = uuid.uuid4().hex  #Every single request that hits your server gets its own unique ID and hex remove any hypen 
-    
-    response.headers["X-Request-ID"] = request_id #sends that unique ID back to the frontend inside the HTTP response headers.
-    
-    start_time = time.time() # to calcuate latency
-    
-    effective_thread_id = f"{user.user_id}:{request.thread_id or 'default'}" #Creates a unique conversation thread identifier combining user + thread.
+    request_id = uuid.uuid4().hex  
+    response.headers["X-Request-ID"] = request_id 
+    start_time = time.time() 
+    effective_thread_id = f"{user.user_id}:{request.thread_id or 'default'}" 
 
+    def _finish(q_status: QueryStatus, resp_text: str, citations_list=None):
+        c_objs = citations_list or []
+        c_dicts = [c.dict() if hasattr(c, "dict") else c for c in c_objs]
+        try:
+            append_chat_turn(
+                user_id=user.user_id,
+                thread_id=request.thread_id or "default",
+                user_query=request.query,
+                assistant_response=resp_text,
+                citations=c_dicts,
+                status=q_status.value if hasattr(q_status, "value") else str(q_status),
+            )
+        except Exception as ex:
+            logger.warning("Could not persist turn to sqlite: %s", ex)
+        return QueryResponse(
+            request_id=request_id,
+            status=q_status,
+            response=resp_text,
+            citations=c_objs,
+        )
 
-    input_check = run_input_guardrails(request.query)
+    input_check = run_input_guardrails(request.query, user.role)
+    stage = input_check.get("stage")
+    logged_query = "[redacted: pii]" if stage == "pii" else request.query
 
+    # 1. DIALOG CHECK (Greetings / Goodbyes)
     if input_check.get("is_dialog"):
         latency = time.time() - start_time
         log_request(
@@ -104,26 +173,31 @@ async def handle_query(
             cost_usd=0.0,
             retrieved_docs_count=0,
         )
-        return QueryResponse(
-            request_id=request_id,
-            status=QueryStatus.answered,
-            response=input_check["dialog_response"],
-            citations=[],
+        return _finish(
+            QueryStatus.answered,
+            input_check["dialog_response"],
+            [],
         )
 
+    # 2. BLOCKED CHECK (Firewall)
+    # IMPORTANT: This is dedented to the correct level!
     if input_check["blocked"]:
         latency = time.time() - start_time
+        
+        # USE THE POLITE MESSAGE FROM THE FIREWALL
+        polite_msg = input_check.get("dialog_response") or "I apologize, but I cannot help with that request. I can only assist with HR, IT, and Finance questions."
+        
         log_request(
             request_id=request_id,
             user_id=user.user_id,
             role=user.role,
-            query=request.query,
+            query=logged_query,
             blocked=True,
-            reason=input_check.get("reason", "blocked"),
+            reason=input_check["reason"],
             stage="input_blocked",
             latency_sec=latency,
-            final_response="",
-            block_stage=input_check.get("stage", ""),
+            final_response=polite_msg,
+            retrieved_docs_count=0,
         )
         record_request(
             request_id=request_id,
@@ -137,18 +211,17 @@ async def handle_query(
             cost_usd=0.0,
             retrieved_docs_count=0,
         )
-        return QueryResponse(
-            request_id=request_id,
-            status=QueryStatus.blocked,
-            response="Request blocked by security policies.",
-            citations=[],
+        return _finish(
+            QueryStatus.blocked,
+            polite_msg,
+            [],
         )
 
-    # # Cache check (only for non-dialog, non-blocked queries)
-    # "Cache is controlled via an environment variable RESPONSE_CACHE_ENABLED. The config class reads it from the .env file using os.environ.get() with a default of true. This means cache is on by default, but any developer or DevOps engineer can turn it off without touching code — just change the .env file and restart the server."
-    cache_enabled = settings.RESPONSE_CACHE_ENABLED  # chekc setting for chache
+    # 3. CACHE CHECK
+    cache_enabled = settings.RESPONSE_CACHE_ENABLED 
+    cache_scope = f"{user.role}|{','.join(sorted(user.allowed_departments or []))}"
     if cache_enabled:
-        cached_response = get_cached(request.query, user.role) 
+        cached_response = get_cached(request.query, cache_scope) 
         if cached_response is not None:
             latency = time.time() - start_time
             response.headers["X-Cache"] = "HIT"
@@ -172,31 +245,38 @@ async def handle_query(
                 latency_ms=latency * 1000,
                 retrieved_docs_count=0,
             )
-            return QueryResponse(
-                request_id=request_id,
-                status=QueryStatus.ANSWERED,
-                response=cached_response,
-                citations=[],
+            return _finish(
+                QueryStatus.answered,
+                cached_response,
+                [],
             )
 
     response.headers["X-Cache"] = "MISS"
 
+    # 4. LANGGRAPH AGENTS
     state = {
         "query": request.query,
+        "turn_id": request_id,
         "user_role": user.role,
         "user_departments": user.allowed_departments,
+        "domains": [],
+        "retrieved_docs": [],
+        "synthesized_doc_ids": [],
+        "citations": [],
+        "answer": "",
+        "final_answer": "",
     }
-# "config is a LangGraph-specific dictionary that passes the conversation thread_id to the agent graph. LangGraph uses this to load the correct memory/checkpointer state for that specific conversation thread. Without it, the AI would have no memory between messages — every question would feel like a fresh conversation with no context from before.
+
     try:
         config = {"configurable": {"thread_id": effective_thread_id}}
         result_state = agent_graph.invoke(state, config=config)
-        raw_answer = result_state.get("final_answer", "")
+        raw_answer = result_state.get("final_answer") or result_state.get("answer", "")
     except Exception:
         error_id = uuid.uuid4().hex[:8]
         logger.exception(
             "agent_execution_failed request_id=%s error_id=%s",
             request_id, error_id,
-        )   # to see in terminal
+        ) 
         latency = time.time() - start_time
         err_msg = f"An internal error occurred. Reference: {error_id}"
         log_request(
@@ -222,13 +302,13 @@ async def handle_query(
             cost_usd=0.0,
             retrieved_docs_count=0,
         )
-        return QueryResponse(
-            request_id=request_id,
-            status=QueryStatus.error,
-            response=err_msg,
-            citations=[],
+        return _finish(
+            QueryStatus.error,
+            err_msg,
+            [],
         )
 
+    # 5. OUTPUT GUARDRAILS
     retrieved_docs = result_state.get("retrieved_docs", [])
     output_check = run_output_guardrails(raw_answer, retrieved_docs)
     latency = time.time() - start_time
@@ -259,14 +339,21 @@ async def handle_query(
             cost_usd=0.0,
             retrieved_docs_count=retrieved_count,
         )
-        return QueryResponse(
-            request_id=request_id,
-            status=QueryStatus.blocked,
-            response=output_check["final_answer"],
-            citations=[],
+        return _finish(
+            QueryStatus.blocked,
+            output_check["final_answer"],
+            [],
         )
 
+    # 6. SUCCESS
     final_response = output_check["final_answer"]
+
+    # Clean up internal codes and formatting before sending to UI
+    if "INSUFFICIENT_CONTEXT" in final_response:
+        final_response = "I don't have access to the information needed to answer this query, or the information is not in my knowledge base."
+
+    # Fix the fullwidth Unicode brackets 【 】 that the LLM keeps generating
+    final_response = final_response.replace("【", "[").replace("】", "]")
     log_request(
         request_id=request_id,
         user_id=user.user_id,
@@ -292,25 +379,41 @@ async def handle_query(
         retrieved_docs_count=retrieved_count,
     )
 
-    if cache_enabled:
-        set_cached(request.query, user.role, final_response)
-
     citations_data = result_state.get("citations", [])
     citations = [Citation(**c) for c in citations_data]
-    return QueryResponse(
-        request_id=request_id,
-        status=QueryStatus.answered,
-        response=final_response,
-        citations=citations,
+
+    if cache_enabled and citations:
+        set_cached(request.query, cache_scope, final_response)
+
+    return _finish(
+        QueryStatus.answered,
+        final_response,
+        citations,
     )
 
+@app.get("/chat/history")
+def get_chat_history(user: User = Depends(get_current_user)):
+    threads = get_user_history(user.user_id)
+    return {"threads": threads}
+
+@app.post("/chat/history")
+def post_chat_history(data: dict, user: User = Depends(get_current_user)):
+    threads = data.get("threads", data)
+    save_user_history(user.user_id, threads)
+    return {"status": "ok"}
+
+@app.delete("/chat/history/{thread_id}")
+def delete_chat_thread(thread_id: str, user: User = Depends(get_current_user)):
+    history = get_user_history(user.user_id)
+    filtered = [t for t in history if t.get("id") != thread_id]
+    save_user_history(user.user_id, filtered)
+    return {"status": "ok", "remaining": len(filtered)}
 
 @app.get("/metrics")
 def metrics_endpoint(window: str = "24h"):
     data = get_metrics(window=window)
     data["cache"] = cache_stats()
     return data
-
 
 @app.get("/metrics/prometheus")
 def metrics_prometheus():
@@ -319,35 +422,3 @@ def metrics_prometheus():
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
-
-
-
-
-
-# Incoming HTTP Request (POST /auth/token)
-#            │
-#            ▼
-# FastAPI encounters `Depends(OAuth2PasswordRequestForm)`
-#            │
-#            ├─► 1. Intercepts the request
-#            ├─► 2. Reads the form data (`username` and `password`)
-#            ├─► 3. Validates the data (checks required fields, data types)
-#            │      └── If invalid/missing ──► Returns HTTP 422 Unprocessable Entity
-#            │                                 (Your `login()` never runs!)
-#            │
-#            ▼ (If valid)
-# FastAPI creates `form_data` object
-#            │
-#            ▼
-# FastAPI passes `form_data` as an argument into `login(form_data)`
-#            │
-#            ▼
-# Your `login()` function body starts executing!
-
-# "Yes, exactly. Depends() acts as an interceptor / pre-hook. Before the endpoint function executes, FastAPI runs whatever is inside Depends(). If parsing or validation fails, FastAPI immediately returns an error response and my endpoint code is never even touched. If it succeeds, the output is passed directly into my function's parameters."
-
-# In this line, I’m using FastAPI’s Dependency Injection mechanism with Depends() to extract and validate standard OAuth2 credentials.
-
-# OAuth2PasswordRequestForm tells FastAPI to expect incoming requests as application/x-www-form-urlencoded form data containing a username and password field, exactly as specified in the OAuth2 password grant standard.
-
-# Instead of manually writing boilerplate code to parse form fields, validate MIME types, or return 422 Unprocessable Entity errors, FastAPI handles the extraction and validation behind the scenes and injects the populated form_data object directly into my function."

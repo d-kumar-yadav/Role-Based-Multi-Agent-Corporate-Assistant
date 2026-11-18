@@ -1,5 +1,5 @@
 import logging
-import os
+import re
 
 from langchain_groq import ChatGroq
 from langchain_core.prompts import PromptTemplate
@@ -8,22 +8,27 @@ from app.config import env_config
 logger = logging.getLogger("agents.synthesizer")
 
 llm = ChatGroq(
-    model=os.environ.get("FIREWALL_MODEL", "openai/gpt-oss-20b"),
-    api_key=os.environ.get("FIREWALL_GROQ_API_KEY"),
+    model=env_config.FIREWALL_MODEL,
+    api_key=env_config.FIREWALL_GROQ_API_KEY,
     temperature=0,
     max_tokens=1500,
 )
 
 MAX_PARTIAL_CHARS = 2000
 MAX_TOTAL_CHARS = 4000
+NO_ANSWER = "I couldn't find this in the documents available to you."
+CITATION_RE = re.compile(r"\(([A-Z][A-Z0-9]*(?:-[A-Z0-9]+)+)\)")
+REFUSAL_MARKERS = ("I don't have access", "I couldn't find this", "INSUFFICIENT_CONTEXT")
 
 
 def _truncate(text: str, limit: int) -> str:
-    if not text:
-        return ""
-    if len(text) <= limit:
-        return text
+    if not text or len(text) <= limit:
+        return text or ""
     return text[:limit] + "... [truncated]"
+
+
+def _is_refusal(p: dict) -> bool:
+    return bool(p.get("refusal")) or any(m in str(p.get("answer", "")) for m in REFUSAL_MARKERS)
 
 
 MERGE_PROMPT = """You are merging partial answers from multiple domain
@@ -33,11 +38,16 @@ Rules:
 1. Do NOT introduce facts not present in the partial answers.
 2. Preserve all numbers, doc_ids, and policy details exactly.
 3. Deduplicate overlapping content.
-4. Skip partial answers that are refusals (contain 'I don't have access'
-   or 'INSUFFICIENT_CONTEXT') UNLESS all partials are refusals — in
-   which case return a single combined refusal.
-5. Cite the doc_id for every factual claim.
-6. No conversational filler.
+4. Keep every citation in the form (DOC-ID) at the end of the sentence it supports.
+5. No conversational filler, greetings or closing offers.
+
+Formatting rules (output is rendered as Markdown):
+- Start with one short bold title line.
+- Group content by topic. Use a numbered list for sequential steps and a
+  bulleted list for facts or options. Start list items with a bold phrase.
+- Leave a blank line between the title, each group and the closing note.
+- Put exceptions or warnings in ONE final blockquote line, like:
+  > **Note:** Claims after 60 days need Finance Head approval. (FIN-POLICY-001)
 
 Query: {query}
 
@@ -47,117 +57,74 @@ Partial answers:
 Merged answer:"""
 
 
-def _build_citations(doc_ids: list[str], retrieved_docs: list[dict]) -> list[dict]:
-    """Join doc_ids against retrieved_docs to build Citation-shaped dicts."""
-    meta_by_id = {}
-    if isinstance(retrieved_docs, list):
-        for d in retrieved_docs:
-            if isinstance(d, dict):
-                did = d.get("doc_id")
-                if did and did not in meta_by_id:
-                    meta_by_id[did] = {
-                        "doc_id": did,
-                        "title": d.get("title", ""),
-                        "version": d.get("version", ""),
-                        "section": d.get("section") or None,
-                    }
-    return [meta_by_id[did] for did in doc_ids if did in meta_by_id]
+def _build_citations(doc_ids, retrieved_docs):
+    meta = {}
+    for d in retrieved_docs or []:
+        if isinstance(d, dict) and d.get("doc_id") and d["doc_id"] not in meta:
+            meta[d["doc_id"]] = {
+                "doc_id": d["doc_id"],
+                "title": d.get("title", ""),
+                "version": d.get("version", ""),
+                "section": d.get("section") or None,
+            }
+    return [meta[i] for i in doc_ids if i in meta]
+
+
+def _result(state: dict, answer: str, candidate_ids: list) -> dict:
+    """Cite only documents that appear in the final answer text."""
+    cited = sorted(set(CITATION_RE.findall(answer)) & set(candidate_ids)) or sorted(set(candidate_ids))
+    return {
+        "answer": answer,
+        "synthesized_doc_ids": cited,
+        "citations": _build_citations(cited, state.get("retrieved_docs", [])),
+    }
 
 
 def synthesizer_node(state: dict) -> dict:
-    partials = state.get("partial_answers", [])
     query = state.get("query", "")
+    partials = state.get("partial_answers", [])
+    if not isinstance(partials, list):
+        partials = []
 
-    if not partials or not isinstance(partials, list):
-        return {
-            "answer": "I cannot answer this query.",
-            "synthesized_doc_ids": [],
-            "citations": [],
-        }
+    # Only this turn's partials; older turns stay in state but are ignored
+    valid = [p for p in partials if isinstance(p, dict) and p.get("turn_id") == state.get("turn_id")]
 
-    valid_partials = [p for p in partials if isinstance(p, dict)]
-    if not valid_partials:
-        return {
-            "answer": "I cannot answer this query.",
-            "synthesized_doc_ids": [],
-            "citations": [],
-        }
-
-    # Deduplicate accumulated partials across turns by domain, retaining latest
     latest_by_domain = {}
-    for p in valid_partials:
+    for p in valid:
         dom = p.get("domain")
-        if isinstance(dom, str) and dom.strip():
-            key = dom.strip()
-        else:
-            key = "unknown"
-        latest_by_domain[key] = p
-    current_partials = list(latest_by_domain.values())
+        latest_by_domain[dom.strip() if isinstance(dom, str) and dom.strip() else "unknown"] = p
+    current = list(latest_by_domain.values())
 
-    # Single partial — pass through unchanged
-    if len(current_partials) == 1:
-        doc_ids = current_partials[0].get("doc_ids", [])
-        if not isinstance(doc_ids, list):
-            doc_ids = []
-        raw_ans = current_partials[0].get("answer", "")
-        ans = raw_ans if isinstance(raw_ans, str) else str(raw_ans or "")
-        return {
-            "answer": ans,
-            "synthesized_doc_ids": doc_ids,
-            "citations": _build_citations(doc_ids, state.get("retrieved_docs", [])),
-        }
+    if not current:
+        return {"answer": NO_ANSWER, "synthesized_doc_ids": [], "citations": []}
 
-    # All refusals — return a single combined refusal
-    refusal_markers = ("I don't have access", "INSUFFICIENT_CONTEXT")
-    all_refusals = all(
-        any(m in str(p.get("answer", "")) for m in refusal_markers)
-        for p in current_partials
-    )
-    if all_refusals:
-        return {
-            "answer": "I don't have access to the information needed to answer this query.",
-            "synthesized_doc_ids": [],
-            "citations": [],
-        }
+    answering = [p for p in current if not _is_refusal(p)]
+    if not answering:
+        return {"answer": NO_ANSWER, "synthesized_doc_ids": [], "citations": []}
 
-    # Calculate raw character count before bounding
-    raw_chars = sum(len(str(p.get("answer", ""))) for p in current_partials)
+    def ids_of(p):
+        ids = p.get("doc_ids", [])
+        return [i for i in ids if isinstance(i, str)] if isinstance(ids, list) else []
 
-    # Format each partial bounded by MAX_PARTIAL_CHARS
-    formatted_blocks = []
-    for p in current_partials:
-        dom = str(p.get("domain") or "unknown").strip()
-        ans_val = p.get("answer", "")
-        ans_text = ans_val if isinstance(ans_val, str) else str(ans_val or "")
-        truncated_ans = _truncate(ans_text.strip(), MAX_PARTIAL_CHARS)
-        formatted_blocks.append(f"[{dom}]\n{truncated_ans}")
+    # One real answer: pass through, no LLM call, formatting untouched
+    if len(answering) == 1:
+        p = answering[0]
+        return _result(state, str(p.get("answer", "")), ids_of(p))
 
-    partials_text = "\n\n".join(formatted_blocks)
+    blocks = [
+        f"[{str(p.get('domain') or 'unknown').strip()}]\n{_truncate(str(p.get('answer', '')).strip(), MAX_PARTIAL_CHARS)}"
+        for p in answering
+    ]
+    partials_text = "\n\n".join(blocks)[:MAX_TOTAL_CHARS]
+    all_ids = sorted({i for p in answering for i in ids_of(p)})
 
-    # Enforce strict hard cap on partials_text
-    if len(partials_text) > MAX_TOTAL_CHARS:
-        partials_text = partials_text[:MAX_TOTAL_CHARS]
+    logger.info("synthesizer: partials=%d merged=%d chars=%d", len(partials), len(answering), len(partials_text))
 
-    logger.info(
-        "synthesizer_input_bounded: raw_partials=%d deduplicated_partials=%d raw_chars=%d bounded_chars=%d",
-        len(partials),
-        len(current_partials),
-        raw_chars,
-        len(partials_text),
-    )
+    try:
+        chain = PromptTemplate.from_template(MERGE_PROMPT) | llm
+        merged = chain.invoke({"query": query, "partials": partials_text}).content.strip()
+    except Exception:
+        logger.exception("synthesizer merge failed; falling back to joined answers")
+        merged = "\n\n".join(str(p.get("answer", "")).strip() for p in answering)
 
-    prompt = PromptTemplate.from_template(MERGE_PROMPT)
-    chain = prompt | llm
-    response = chain.invoke({"query": query, "partials": partials_text})
-
-    all_doc_ids = sorted({
-        did for p in current_partials
-        if isinstance(p.get("doc_ids"), list)
-        for did in p["doc_ids"]
-        if isinstance(did, str)
-    })
-    return {
-        "answer": response.content,
-        "synthesized_doc_ids": all_doc_ids,
-        "citations": _build_citations(all_doc_ids, state.get("retrieved_docs", [])),
-    }
+    return _result(state, merged, all_ids)

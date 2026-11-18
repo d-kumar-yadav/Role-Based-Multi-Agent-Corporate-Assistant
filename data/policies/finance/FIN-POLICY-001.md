@@ -78,30 +78,7 @@ Each office location maintains a petty cash float not exceeding INR 25,000, ma
 
 Finance conducts quarterly internal audits of expense claims, vendor payments, and petty cash records. External statutory audit is conducted annually. Any employee found to have submitted a fraudulent expense claim is subject to disciplinary action up to termination, and recovery of the disbursed amount.
 
-## Recent Finance Memos
-
-- **Memo FIN-2025-014 — Q3 Revenue Summary**  
-  Q3 revenue closed at INR 42.3 crore, approximately 6 % above forecast, driven primarily by higher‑than‑expected renewal rates in the enterprise segment. Gross margin held steady at 61 %. Full variance analysis is available in the Finance shared drive under Q3‑Reporting.
-
-- **Memo FIN-2025-015 — Temporary Budget Freeze on Non‑Essential Software Spend**  
-  Effective immediately, all new SaaS subscription requests above INR 20,000 annually require CFO approval in addition to the standard Approval Matrix, pending completion of the Q4 vendor consolidation review. This freeze does not apply to renewals of existing critical infrastructure tools.
-
-- **Memo FIN-2025-016 — Year‑End Closing Schedule**  
-  All expense claims for the current fiscal year must be submitted no later than March 20 to be included in year‑end closing. Claims submitted after this date will be processed in the new fiscal year. Department Heads should ensure all pending POs are finalized by March 15.
-
 ## Contact
 
 - For expense policy questions, contact **finance-support@meridianglobal.example**.  
 - For budget or variance questions, contact your assigned Finance Business Partner.
-
-## Revision History
-
-| Version | Effective Date | Author | Description |
-|---------|----------------|--------|-------------|
-| 1.0 | 2026-10-11 | Finance & Accounts Team | Initial version |
-
-## Document Control
-
-| Owner | Approver | Distribution | Review Cycle |
-|-------|----------|--------------|--------------|
-| Finance & Accounts Team | Finance Head | All finance staff and relevant managers | Semi‑annual |

@@ -1,4 +1,5 @@
 import logging
+import re
 import unicodedata
 
 from app.guardrails.groundedness.citation_check import verify_citations
@@ -7,8 +8,6 @@ from app.guardrails.groundedness.nli_check import check_claims
 from app.guardrails.groundedness.anchor_check import extract_anchors, verify_anchors
 
 logger = logging.getLogger("guardrails.groundedness.pipeline")
-
-ENTAILMENT_THRESHOLD = 0.75
 
 
 def _normalize_text(text: str) -> str:
@@ -50,8 +49,7 @@ def _normalize_text(text: str) -> str:
     }
     for bad, good in replacements.items():
         text = text.replace(bad, good)
-    import re as _re
-    text = _re.sub(r" {2,}", " ", text)
+    text = re.sub(r" {2,}", " ", text)
     return unicodedata.normalize("NFKC", text)
 
 
@@ -73,6 +71,7 @@ def verify_groundedness(answer: str, retrieved_docs: list[dict]) -> dict:
         }
 
     context = "\n\n".join(d.get("content", "") for d in retrieved_docs)
+    context = re.sub(r"</?document[^>]*>", "\n\n", context)
     context = _normalize_text(context)
     retrieved_doc_ids = {d.get("doc_id") for d in retrieved_docs if d.get("doc_id")}
 
@@ -93,10 +92,6 @@ def verify_groundedness(answer: str, retrieved_docs: list[dict]) -> dict:
         contradictions = nli_result.get("contradiction_count", 0)
         ratio = nli_result.get("entailment_ratio", 1.0)
 
-        # NLI is a signal, not a gate. The model was trained on general text
-        # and misclassifies dense policy language. Contradictions are logged
-        # for observability but do not block. Deterministic stages (citations
-        # and anchors) remain the blocking layer.
         if contradictions > 0:
             logger.warning(
                 "nli_contradiction_signal contradictions=%d ratio=%.2f — not blocking",
@@ -108,7 +103,6 @@ def verify_groundedness(answer: str, retrieved_docs: list[dict]) -> dict:
                 ratio, nli_result.get("neutral_count", 0),
             )
 
-        # Attach the NLI result to the output for downstream audit visibility
         nli_signal = {
             "entailment_ratio": ratio,
             "contradiction_count": contradictions,
@@ -177,4 +171,3 @@ def verify_groundedness(answer: str, retrieved_docs: list[dict]) -> dict:
             "anchors": stage3,
         },
     }
-

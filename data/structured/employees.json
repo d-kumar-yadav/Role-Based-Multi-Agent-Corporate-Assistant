@@ -192,6 +192,22 @@
     ]
   },
   {
+    "user_id": "E6000",
+    "email": "ceo@meridianglobal.example",
+    "name": "Elena Vance (CEO)",
+    "role": "executive",
+    "department": "Executive",
+    "manager_id": null,
+    "allowed_departments": [
+      "sales",
+      "engineering",
+      "hr",
+      "finance",
+      "it",
+      "shared"
+    ]
+  },
+  {
     "user_id": "E6001",
     "email": "cto@meridianglobal.example",
     "name": "CTO",

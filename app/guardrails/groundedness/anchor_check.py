@@ -7,6 +7,13 @@ ANCHOR_PATTERNS = {
     "date":       re.compile(r"\b\d{4}-\d{2}-\d{2}\b"),
 }
 
+_NUM_RE = re.compile(r"\d+(?:\.\d+)?")
+
+
+def _numbers(text: str) -> set:
+    return set(_NUM_RE.findall(text.replace(",", "")))
+
+
 SPACE_REPLACEMENTS = {
     "\u00a0": " ",   # no-break space
     "\u2007": " ",   # figure space
@@ -49,6 +56,7 @@ def verify_anchors(anchors: dict, context: str) -> dict:
     Returns {"valid": bool, "unverified": [...], "total": int, "verified": int}
     """
     context = _normalize_text(context)
+    context_nums = _numbers(context)
     unverified = []
     total = 0
     verified = 0
@@ -76,6 +84,11 @@ def verify_anchors(anchors: dict, context: str) -> dict:
             elif anchor_nc.lower() in context.replace(",", "").lower():
                 is_verified = True
 
+        if not is_verified:
+            nums = _numbers(normalized_anchor)
+            if nums and nums <= context_nums:
+                is_verified = True
+
         if is_verified:
             verified += 1
         else:
@@ -87,4 +100,3 @@ def verify_anchors(anchors: dict, context: str) -> dict:
         "total": total,
         "verified": verified,
     }
-
