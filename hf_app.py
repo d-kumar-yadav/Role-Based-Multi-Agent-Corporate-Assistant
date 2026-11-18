@@ -10,6 +10,19 @@ try:
 except ImportError:
     pass
 
+# ZeroGPU compatibility for Hugging Face Spaces
+try:
+    import spaces
+
+    @spaces.GPU
+    def _zero_gpu_startup():
+        return True
+
+    _zero_gpu_startup()
+    print("[Startup] ZeroGPU initialized successfully.")
+except Exception:
+    pass
+
 import gradio as gr
 from app.main import app as fastapi_app
 from app.rag.ingest import ingest_documents
