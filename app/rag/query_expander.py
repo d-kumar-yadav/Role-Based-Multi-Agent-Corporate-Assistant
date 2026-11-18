@@ -7,6 +7,7 @@ from collections import OrderedDict
 
 from langchain_groq import ChatGroq
 from langchain_core.prompts import PromptTemplate
+from app.config import env_config
 
 logger = logging.getLogger("rag.query_expander")
 
@@ -38,9 +39,9 @@ def _get_llm():
         with _llm_lock:
             if _llm is None:
                 _llm = ChatGroq(
-                    model=os.environ.get("EXPAND_MODEL") or os.environ.get("ROUTER_MODEL") or "openai/gpt-oss-20b",
+                    model=env_config.EXPAND_MODEL,
                     temperature=0.3,
-                    api_key=os.environ.get("FIREWALL_GROQ_API_KEY") or os.environ.get("GROQ_API_KEY"),
+                    api_key=env_config.FIREWALL_GROQ_API_KEY or env_config.GROQ_API_KEY,
                     timeout=5,
                     max_retries=0,
                 )

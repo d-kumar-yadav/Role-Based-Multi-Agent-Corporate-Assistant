@@ -9,6 +9,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from .pii_patterns import detect_pii
 from .regex_filter import regex_check
 from .dialog import check_dialog
+from app.config import env_config
 
 load_dotenv()
 
@@ -47,8 +48,8 @@ def _get_llm():
             if _llm is None:
                 from langchain_groq import ChatGroq
                 _llm = ChatGroq(
-                    model=os.environ.get("FIREWALL_MODEL", "openai/gpt-oss-20b"),
-                    api_key=os.environ.get("FIREWALL_GROQ_API_KEY"),
+                    model=env_config.FIREWALL_MODEL,
+                    api_key=env_config.FIREWALL_GROQ_API_KEY,
                     temperature=0.0,
                     timeout=5,        # fail fast
                     max_retries=0,    # no retry delay
