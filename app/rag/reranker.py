@@ -19,7 +19,7 @@ def _get_model():
         if _model is None and not _model_failed:
             try:
                 from sentence_transformers import CrossEncoder
-                _model = CrossEncoder(MODEL_NAME, max_length=512)
+                _model = CrossEncoder(MODEL_NAME, max_length=512, device="cpu")
                 logger.info("Reranker model loaded: %s", MODEL_NAME)
             except Exception as e:
                 logger.exception("Failed to load reranker: %s", e)

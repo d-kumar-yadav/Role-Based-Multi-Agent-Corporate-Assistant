@@ -7,17 +7,17 @@ load_dotenv()
 
 class Settings:
     # Required (fail at import if missing)
-    MODEL: str = os.environ.get("MODEL", "openai/gpt-oss-20b")
-    FIREWALL_MODEL: str = os.environ.get("FIREWALL_MODEL", "openai/gpt-oss-20b")
-    ROUTER_MODEL: str = os.environ.get("ROUTER_MODEL", "openai/gpt-oss-20b")
-    EXPAND_MODEL: str = os.environ.get("EXPAND_MODEL", "openai/gpt-oss-20b")
+    MODEL: str = (os.environ.get("MODEL") or "openai/gpt-oss-20b").strip()
+    FIREWALL_MODEL: str = (os.environ.get("FIREWALL_MODEL") or "openai/gpt-oss-20b").strip()
+    ROUTER_MODEL: str = (os.environ.get("ROUTER_MODEL") or "openai/gpt-oss-20b").strip()
+    EXPAND_MODEL: str = (os.environ.get("EXPAND_MODEL") or "openai/gpt-oss-20b").strip()
 
-    GROQ_API_KEY: str = os.environ.get("GROQ_API_KEY", "")
-    FIREWALL_GROQ_API_KEY: str = os.environ.get("FIREWALL_GROQ_API_KEY", "")
+    GROQ_API_KEY: str = (os.environ.get("GROQ_API_KEY") or "").strip()
+    FIREWALL_GROQ_API_KEY: str = (os.environ.get("FIREWALL_GROQ_API_KEY") or "").strip()
 
-    JWT_SECRET: str = os.environ.get("JWT_SECRET", "")
-    JWT_ALGORITHM: str = os.environ.get("JWT_ALGORITHM", "HS256")
-    JWT_EXPIRE_MINUTES: int = int(os.environ.get("JWT_EXPIRE_MINUTES", "480"))
+    JWT_SECRET: str = (os.environ.get("JWT_SECRET") or "").strip()
+    JWT_ALGORITHM: str = (os.environ.get("JWT_ALGORITHM") or "HS256").strip()
+    JWT_EXPIRE_MINUTES: int = int((os.environ.get("JWT_EXPIRE_MINUTES") or "480").strip())
 
     QDRANT_URL: str | None = os.environ.get("QDRANT_URL") or None
     ENV: str = os.environ.get("ENV", "dev")
