@@ -31,3 +31,4 @@ logs/*.jsonl
 dashboard/chats.json
 *.safetensors
 *.onnx
+docs/
