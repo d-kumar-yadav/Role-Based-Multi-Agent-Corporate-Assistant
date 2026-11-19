@@ -3,7 +3,7 @@ from app.guardrails.retrieved_content_sanitizer import sanitize_and_wrap
 
 
 def retriever_node(state: dict) -> dict:
-    query = (state.get("query") or "").strip()
+    query = (state.get("standalone_query") or state.get("query") or "").strip()
     user_role = state.get("user_role")
     user_departments = state.get("user_departments")
     domains = state.get("domains") or []

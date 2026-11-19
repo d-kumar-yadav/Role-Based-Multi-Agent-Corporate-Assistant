@@ -62,6 +62,18 @@ def get_user_history(user_id: str) -> list[dict]:
             return []
 
 
+def get_recent_thread_messages(user_id: str, thread_id: str, max_messages: int = 6) -> list[dict]:
+    """Retrieve the most recent messages for a specific thread of a user."""
+    if not user_id or not thread_id:
+        return []
+    threads = get_user_history(user_id)
+    for t in threads:
+        if t.get("id") == thread_id:
+            msgs = t.get("messages", [])
+            return msgs[-max_messages:] if len(msgs) > max_messages else list(msgs)
+    return []
+
+
 def save_user_history(user_id: str, threads: list | dict) -> None:
     """Save/upsert the entire threads collection for a user in SQLite."""
     if not user_id:
