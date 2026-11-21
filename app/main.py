@@ -25,14 +25,7 @@ from app.observability.metrics import record_request, get_metrics
 from app.observability.prometheus_export import get_prometheus_metrics
 from app.observability.response_cache import get_cached, set_cached, cache_stats
 from app.config.env_config import settings
-from app.storage.chat_history_db import get_user_history, save_user_history, append_chat_turn, get_recent_thread_messages
-from app.agents.context_memory import (
-    is_chat_summary_query,
-    handle_chat_summary,
-    is_why_explanation_query,
-    explain_previous_refusal,
-    condense_query,
-)
+from app.storage.chat_history_db import get_user_history, save_user_history, append_chat_turn
 
 logger = logging.getLogger("api.main")
 
@@ -127,8 +120,7 @@ def handle_query(
     request_id = uuid.uuid4().hex  
     response.headers["X-Request-ID"] = request_id 
     start_time = time.time() 
-    thread_id = request.thread_id or "default"
-    effective_thread_id = f"{user.user_id}:{thread_id}" 
+    effective_thread_id = f"{user.user_id}:{request.thread_id or 'default'}" 
 
     def _finish(q_status: QueryStatus, resp_text: str, citations_list=None):
         c_objs = citations_list or []
@@ -136,7 +128,7 @@ def handle_query(
         try:
             append_chat_turn(
                 user_id=user.user_id,
-                thread_id=thread_id,
+                thread_id=request.thread_id or "default",
                 user_query=request.query,
                 assistant_response=resp_text,
                 citations=c_dicts,
@@ -151,45 +143,12 @@ def handle_query(
             citations=c_objs,
         )
 
-    # 0. RETRIEVE RECENT CHAT HISTORY FOR MULTI-TURN CONTEXT
-    recent_history = get_recent_thread_messages(user.user_id, thread_id, max_messages=6)
-
-    # 1. FAST SECURITY CHECK ON RAW INPUT (Regex injection/profanity, PII, Length)
-    raw_check = run_input_guardrails(request.query, user.role)
-    stage = raw_check.get("stage")
+    input_check = run_input_guardrails(request.query, user.role)
+    stage = input_check.get("stage")
     logged_query = "[redacted: pii]" if stage == "pii" else request.query
 
-    if raw_check.get("blocked") and stage in ("input", "regex", "pii"):
-        latency = time.time() - start_time
-        polite_msg = raw_check.get("dialog_response") or "I cannot help with that request."
-        log_request(
-            request_id=request_id,
-            user_id=user.user_id,
-            role=user.role,
-            query=logged_query,
-            blocked=True,
-            reason=raw_check["reason"],
-            stage="input_blocked",
-            latency_sec=latency,
-            final_response=polite_msg,
-            retrieved_docs_count=0,
-        )
-        record_request(
-            request_id=request_id,
-            user_id=user.user_id,
-            role=user.role,
-            blocked=True,
-            stage="input_blocked",
-            latency_ms=latency * 1000,
-            tokens_in=0,
-            tokens_out=0,
-            cost_usd=0.0,
-            retrieved_docs_count=0,
-        )
-        return _finish(QueryStatus.blocked, polite_msg, [])
-
-    # 2. DIALOG CHECK (Greetings / Goodbyes)
-    if raw_check.get("is_dialog"):
+    # 1. DIALOG CHECK (Greetings / Goodbyes)
+    if input_check.get("is_dialog"):
         latency = time.time() - start_time
         log_request(
             request_id=request_id,
@@ -200,7 +159,7 @@ def handle_query(
             reason="scripted_dialog",
             stage="dialog",
             latency_sec=latency,
-            final_response=raw_check["dialog_response"],
+            final_response=input_check["dialog_response"],
         )
         record_request(
             request_id=request_id,
@@ -216,76 +175,16 @@ def handle_query(
         )
         return _finish(
             QueryStatus.answered,
-            raw_check["dialog_response"],
+            input_check["dialog_response"],
             [],
         )
 
-    # 3. CHAT SUMMARY INTENT (e.g., "summarize this chat", "recap")
-    if is_chat_summary_query(request.query):
-        summary_resp = handle_chat_summary(recent_history)
+    # 2. BLOCKED CHECK (Firewall)
+    # IMPORTANT: This is dedented to the correct level!
+    if input_check["blocked"]:
         latency = time.time() - start_time
-        log_request(
-            request_id=request_id,
-            user_id=user.user_id,
-            role=user.role,
-            query=request.query,
-            blocked=False,
-            reason="chat_summary",
-            stage="chat_summary",
-            latency_sec=latency,
-            final_response=summary_resp,
-        )
-        record_request(
-            request_id=request_id,
-            user_id=user.user_id,
-            role=user.role,
-            blocked=False,
-            stage="chat_summary",
-            latency_ms=latency * 1000,
-            tokens_in=0,
-            tokens_out=0,
-            cost_usd=0.0,
-            retrieved_docs_count=0,
-        )
-        return _finish(QueryStatus.answered, summary_resp, [])
-
-    # 4. EXPLANATION OF PREVIOUS REFUSAL / BLOCK (e.g. "why", "why not")
-    if is_why_explanation_query(request.query, recent_history):
-        explanation_resp = explain_previous_refusal(request.query, recent_history)
-        latency = time.time() - start_time
-        log_request(
-            request_id=request_id,
-            user_id=user.user_id,
-            role=user.role,
-            query=request.query,
-            blocked=False,
-            reason="refusal_explanation",
-            stage="conversation_explanation",
-            latency_sec=latency,
-            final_response=explanation_resp,
-        )
-        record_request(
-            request_id=request_id,
-            user_id=user.user_id,
-            role=user.role,
-            blocked=False,
-            stage="conversation_explanation",
-            latency_ms=latency * 1000,
-            tokens_in=0,
-            tokens_out=0,
-            cost_usd=0.0,
-            retrieved_docs_count=0,
-        )
-        return _finish(QueryStatus.answered, explanation_resp, [])
-
-    # 5. MULTI-TURN CONTEXT CONDENSATION / FOLLOW-UP RESOLUTION
-    standalone_query = condense_query(request.query, recent_history)
-
-    # 6. FIREWALL CHECK (Run on contextualized query)
-    input_check = run_input_guardrails(standalone_query, user.role) if standalone_query != request.query else raw_check
-
-    if input_check.get("blocked"):
-        latency = time.time() - start_time
+        
+        # USE THE POLITE MESSAGE FROM THE FIREWALL
         polite_msg = input_check.get("dialog_response") or "I apologize, but I cannot help with that request. I can only assist with HR, IT, and Finance questions."
         
         log_request(
@@ -318,11 +217,11 @@ def handle_query(
             [],
         )
 
-    # 7. CACHE CHECK
+    # 3. CACHE CHECK
     cache_enabled = settings.RESPONSE_CACHE_ENABLED 
     cache_scope = f"{user.role}|{','.join(sorted(user.allowed_departments or []))}"
     if cache_enabled:
-        cached_response = get_cached(standalone_query, cache_scope) 
+        cached_response = get_cached(request.query, cache_scope) 
         if cached_response is not None:
             latency = time.time() - start_time
             response.headers["X-Cache"] = "HIT"
@@ -354,10 +253,9 @@ def handle_query(
 
     response.headers["X-Cache"] = "MISS"
 
-    # 8. LANGGRAPH AGENTS
+    # 4. LANGGRAPH AGENTS
     state = {
         "query": request.query,
-        "standalone_query": standalone_query,
         "turn_id": request_id,
         "user_role": user.role,
         "user_departments": user.allowed_departments,
@@ -367,7 +265,6 @@ def handle_query(
         "citations": [],
         "answer": "",
         "final_answer": "",
-        "chat_history": recent_history,
     }
 
     try:
@@ -487,8 +384,6 @@ def handle_query(
 
     if cache_enabled and citations:
         set_cached(request.query, cache_scope, final_response)
-        if standalone_query != request.query:
-            set_cached(standalone_query, cache_scope, final_response)
 
     return _finish(
         QueryStatus.answered,

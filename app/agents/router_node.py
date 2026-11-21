@@ -76,7 +76,7 @@ def _llm_route(query: str) -> set:
 
 # ── main node ─────────────────────────────────────────────────────────────────
 def router_node(state: dict) -> dict:
-    query = (state.get("standalone_query") or state.get("query") or "").lower()
+    query = (state.get("query") or "").lower()
 
     # 1. Fast keyword pass
     matched: set = set()

@@ -81,7 +81,7 @@ def _result(state: dict, answer: str, candidate_ids: list) -> dict:
 
 
 def synthesizer_node(state: dict) -> dict:
-    query = state.get("standalone_query") or state.get("query", "")
+    query = state.get("query", "")
     partials = state.get("partial_answers", [])
     if not isinstance(partials, list):
         partials = []

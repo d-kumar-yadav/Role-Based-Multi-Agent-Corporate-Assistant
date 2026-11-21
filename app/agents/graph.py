@@ -15,7 +15,6 @@ from .validator_node import validator_node
 
 class AgentState(TypedDict):
     query: str
-    standalone_query: str
     turn_id: str                  
     user_role: str
     user_departments: list[str]   # allowed department
@@ -26,7 +25,6 @@ class AgentState(TypedDict):
     citations: list[dict]
     answer: str
     final_answer: str
-    chat_history: list[dict]
 
 
 VALID_DOMAINS = {"hr", "finance", "it"}  # NEW

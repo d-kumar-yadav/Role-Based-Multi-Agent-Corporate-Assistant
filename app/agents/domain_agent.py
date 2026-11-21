@@ -2,7 +2,6 @@ import re
 from langchain_groq import ChatGroq
 from langchain_core.prompts import PromptTemplate
 from app.config import env_config
-from app.agents.context_memory import format_chat_history_for_prompt
 
 llm = ChatGroq(model=env_config.MODEL, temperature=0)
 
@@ -57,7 +56,7 @@ Formatting rules (output is rendered as Markdown):
 - Do not repeat the question, add greetings, or add closing offers like
   "let me know if you need more".
 
-{chat_history_section}Context:
+Context:
 {context}
 
 Query: {query}
@@ -84,7 +83,7 @@ def make_domain_agent(domain: str):
         }
 
     def node(state: dict) -> dict:
-        query = state.get("standalone_query") or state.get("query", "")
+        query = state.get("query", "")
         docs = [
             d for d in state.get("retrieved_docs", [])
             if d.get("department") in (domain, "public", "cross", "crossdomain")
@@ -95,15 +94,10 @@ def make_domain_agent(domain: str):
 
         context = "\n\n".join(f"[{d['doc_id']}] {d['content']}" for d in docs)
 
-        history_msgs = state.get("chat_history", [])
-        history_formatted = format_chat_history_for_prompt(history_msgs, max_messages=4)
-        chat_history_section = f"Recent Conversation Context:\n{history_formatted}\n\n" if history_formatted else ""
-
         try:
             text = chain.invoke({
                 "persona": cfg["persona"],
                 "tone": cfg["tone"],
-                "chat_history_section": chat_history_section,
                 "context": context,
                 "query": query,
             }).content.strip()
